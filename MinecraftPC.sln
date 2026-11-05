@@ -1,0 +1,117 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2012
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Minecraft.World", "Minecraft.World\Minecraft.World.vcxproj", "{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Minecraft.Client", "Minecraft.Client\Minecraft.Client.vcxproj", "{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}"
+	ProjectSection(ProjectDependencies) = postProject
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8} = {F046C3CE-9749-4823-B32B-D9CC10B1A2C8}
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		ContentPackage_NO_TU|Durango = ContentPackage_NO_TU|Durango
+		ContentPackage_NO_TU|ORBIS = ContentPackage_NO_TU|ORBIS
+		ContentPackage_NO_TU|Win32 = ContentPackage_NO_TU|Win32
+		ContentPackage_NO_TU|x64 = ContentPackage_NO_TU|x64
+		CONTENTPACKAGE_SYMBOLS|Durango = CONTENTPACKAGE_SYMBOLS|Durango
+		CONTENTPACKAGE_SYMBOLS|ORBIS = CONTENTPACKAGE_SYMBOLS|ORBIS
+		CONTENTPACKAGE_SYMBOLS|Win32 = CONTENTPACKAGE_SYMBOLS|Win32
+		CONTENTPACKAGE_SYMBOLS|x64 = CONTENTPACKAGE_SYMBOLS|x64
+		ContentPackage|Durango = ContentPackage|Durango
+		ContentPackage|ORBIS = ContentPackage|ORBIS
+		ContentPackage|Win32 = ContentPackage|Win32
+		ContentPackage|x64 = ContentPackage|x64
+		Debug|Durango = Debug|Durango
+		Debug|ORBIS = Debug|ORBIS
+		Debug|Win32 = Debug|Win32
+		Debug|x64 = Debug|x64
+		Release|Durango = Release|Durango
+		Release|ORBIS = Release|ORBIS
+		Release|Win32 = Release|Win32
+		Release|x64 = Release|x64
+		ReleaseForArt|Durango = ReleaseForArt|Durango
+		ReleaseForArt|ORBIS = ReleaseForArt|ORBIS
+		ReleaseForArt|Win32 = ReleaseForArt|Win32
+		ReleaseForArt|x64 = ReleaseForArt|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ContentPackage_NO_TU|Durango.ActiveCfg = ContentPackage_NO_TU|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ContentPackage_NO_TU|ORBIS.ActiveCfg = ContentPackage_NO_TU|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ContentPackage_NO_TU|Win32.ActiveCfg = ContentPackage_NO_TU|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ContentPackage_NO_TU|Win32.Build.0 = ContentPackage_NO_TU|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ContentPackage_NO_TU|x64.ActiveCfg = ContentPackage_NO_TU|x64
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ContentPackage_NO_TU|x64.Build.0 = ContentPackage_NO_TU|x64
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.CONTENTPACKAGE_SYMBOLS|Durango.ActiveCfg = CONTENTPACKAGE_SYMBOLS|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.CONTENTPACKAGE_SYMBOLS|ORBIS.ActiveCfg = CONTENTPACKAGE_SYMBOLS|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.CONTENTPACKAGE_SYMBOLS|Win32.ActiveCfg = CONTENTPACKAGE_SYMBOLS|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.CONTENTPACKAGE_SYMBOLS|Win32.Build.0 = CONTENTPACKAGE_SYMBOLS|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.CONTENTPACKAGE_SYMBOLS|x64.ActiveCfg = CONTENTPACKAGE_SYMBOLS|x64
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.CONTENTPACKAGE_SYMBOLS|x64.Build.0 = CONTENTPACKAGE_SYMBOLS|x64
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ContentPackage|Durango.ActiveCfg = ContentPackage|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ContentPackage|ORBIS.ActiveCfg = ContentPackage|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ContentPackage|Win32.ActiveCfg = ContentPackage|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ContentPackage|Win32.Build.0 = ContentPackage|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ContentPackage|x64.ActiveCfg = ContentPackage|x64
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ContentPackage|x64.Build.0 = ContentPackage|x64
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.Debug|Durango.ActiveCfg = Debug|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.Debug|ORBIS.ActiveCfg = Debug|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.Debug|Win32.ActiveCfg = Debug|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.Debug|Win32.Build.0 = Debug|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.Debug|x64.ActiveCfg = Debug|x64
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.Debug|x64.Build.0 = Debug|x64
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.Release|Durango.ActiveCfg = Release|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.Release|ORBIS.ActiveCfg = Release|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.Release|Win32.ActiveCfg = Release|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.Release|Win32.Build.0 = Release|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.Release|x64.ActiveCfg = Release|x64
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.Release|x64.Build.0 = Release|x64
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ReleaseForArt|Durango.ActiveCfg = ReleaseForArt|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ReleaseForArt|ORBIS.ActiveCfg = ReleaseForArt|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ReleaseForArt|Win32.ActiveCfg = ReleaseForArt|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ReleaseForArt|Win32.Build.0 = ReleaseForArt|Win32
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ReleaseForArt|x64.ActiveCfg = ReleaseForArt|x64
+		{F046C3CE-9749-4823-B32B-D9CC10B1A2C8}.ReleaseForArt|x64.Build.0 = ReleaseForArt|x64
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ContentPackage_NO_TU|Durango.ActiveCfg = ContentPackage_NO_TU|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ContentPackage_NO_TU|ORBIS.ActiveCfg = ContentPackage_NO_TU|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ContentPackage_NO_TU|Win32.ActiveCfg = ContentPackage_NO_TU|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ContentPackage_NO_TU|Win32.Build.0 = ContentPackage_NO_TU|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ContentPackage_NO_TU|x64.ActiveCfg = ContentPackage_NO_TU|x64
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ContentPackage_NO_TU|x64.Build.0 = ContentPackage_NO_TU|x64
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.CONTENTPACKAGE_SYMBOLS|Durango.ActiveCfg = CONTENTPACKAGE_SYMBOLS|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.CONTENTPACKAGE_SYMBOLS|ORBIS.ActiveCfg = CONTENTPACKAGE_SYMBOLS|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.CONTENTPACKAGE_SYMBOLS|Win32.ActiveCfg = CONTENTPACKAGE_SYMBOLS|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.CONTENTPACKAGE_SYMBOLS|Win32.Build.0 = CONTENTPACKAGE_SYMBOLS|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.CONTENTPACKAGE_SYMBOLS|x64.ActiveCfg = CONTENTPACKAGE_SYMBOLS|x64
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.CONTENTPACKAGE_SYMBOLS|x64.Build.0 = CONTENTPACKAGE_SYMBOLS|x64
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ContentPackage|Durango.ActiveCfg = ContentPackage|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ContentPackage|ORBIS.ActiveCfg = ContentPackage|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ContentPackage|Win32.ActiveCfg = ContentPackage|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ContentPackage|Win32.Build.0 = ContentPackage|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ContentPackage|x64.ActiveCfg = ContentPackage|x64
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ContentPackage|x64.Build.0 = ContentPackage|x64
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.Debug|Durango.ActiveCfg = Debug|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.Debug|ORBIS.ActiveCfg = Debug|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.Debug|Win32.ActiveCfg = Debug|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.Debug|Win32.Build.0 = Debug|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.Debug|x64.ActiveCfg = Debug|x64
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.Debug|x64.Build.0 = Debug|x64
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.Release|Durango.ActiveCfg = Release|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.Release|ORBIS.ActiveCfg = Release|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.Release|Win32.ActiveCfg = Release|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.Release|Win32.Build.0 = Release|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.Release|x64.ActiveCfg = Release|x64
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.Release|x64.Build.0 = Release|x64
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ReleaseForArt|Durango.ActiveCfg = ReleaseForArt|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ReleaseForArt|ORBIS.ActiveCfg = ReleaseForArt|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ReleaseForArt|Win32.ActiveCfg = ReleaseForArt|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ReleaseForArt|Win32.Build.0 = ReleaseForArt|Win32
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ReleaseForArt|x64.ActiveCfg = ReleaseForArt|x64
+		{1B9A8C38-DD48-448C-AA24-E1A35E0089A3}.ReleaseForArt|x64.Build.0 = ReleaseForArt|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {CD5AC2E4-C1D3-45C3-AC34-06D43B233179}
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,46 @@
+# Source-only repository: track code, project files, docs and the Xbox build.
+# Everything is ignored by default, then the whitelist below is applied.
+*
+!*/
+!.gitignore
+!README*
+!LICENSE*
+!*.cpp
+!*.h
+!*.hpp
+!*.c
+!*.inl
+!*.vcxproj
+!*.filters
+!*.props
+!*.targets
+!*.sln
+!*.md
+!*.txt
+!*.json
+!*.toml
+!*.bat
+!*.ps1
+!*.cfg
+!*.xml
+!*.fx
+!*.fxh
+!*.hlsl
+!*.glsl
+!*.vert
+!*.frag
+!*.comp
+!*.csv
+!*.lang
+!*.def
+!*.rc
+!*.ico
+!/Xbox360-Build/default.xex
+
+# Never track these, even if a whitelist rule above matches inside them.
+bin/
+obj/
+_sdk_install/
+.vs/
+repo/
+src/

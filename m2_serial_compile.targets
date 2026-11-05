@@ -1,0 +1,9 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Target Name="M2DisableClCompileMp" BeforeTargets="ClCompile">
+    <ItemGroup>
+      <ClCompile Update="@(ClCompile)">
+        <MultiProcessorCompilation>false</MultiProcessorCompilation>
+      </ClCompile>
+    </ItemGroup>
+  </Target>
+</Project>
