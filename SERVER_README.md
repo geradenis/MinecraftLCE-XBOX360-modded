@@ -280,3 +280,8 @@ affected.
   in `Join Game`, completes PreLogin/Login and is added to the world. The
   world load still hangs in Xenia at "Connecting to host"; see
   `Xbox360-Build/README_RU.md` for the PoC status and next steps.
+- Xbox 360 release:
+  https://github.com/geradenis/MinecraftLCE-XBOX360-modded/releases/tag/xbox-tcp-poc-2026-11-08
+  If the TCP `default.xex` does not start, use
+  `default_qnet_backup_20261108.xex` from the same archive for local play
+  and System Link.

@@ -1,5 +1,14 @@
 # MinecraftLCE-XBOX360-modded
 
+> ## ⚠️ Если сборка не запускается
+>
+> Текущий `default.xex` — это TCP PoC. Если он не запускается на вашей консоли или в Xenia, используйте предыдущую QNet-сборку `default_qnet_backup_20261108.xex` из того же архива. Она предназначена для локальной игры и System Link.
+>
+> Релиз: https://github.com/geradenis/MinecraftLCE-XBOX360-modded/releases/tag/xbox-tcp-poc-2026-11-08
+>
+> **Important:** If the current `default.xex` does not start, use the previous QNet build `default_qnet_backup_20261108.xex` from the same archive. It is intended for local play and System Link.
+
+
 Модифицированная сборка **Minecraft: Legacy Console Edition** для **Xbox 360** с бесконечным миром (Overworld / Nether / End), ограниченными кэшами чанков и исправлениями сохранения/загрузки.
 
 > ## ⚠️ ВАЖНО — прочитайте перед запуском
@@ -118,20 +127,30 @@ Minecraft.Client\bin\Xbox 360\Release\Minecraft.Client.xex
 
 ---
 
+## Xbox 360 TCP PoC
+
+- `default.xex` — TCP-клиент к PC-серверу. В Xenia проходит PreLogin/Login, но загрузка мира пока зависает на «Connecting to host».
+- Адрес сервера жёстко задан `192.168.0.209:25565`; для другой сети нужна пересборка.
+- Для локальной игры и System Link используйте `default_qnet_backup_20261108.xex`.
+- Релиз: https://github.com/geradenis/MinecraftLCE-XBOX360-modded/releases/tag/xbox-tcp-poc-2026-11-08
+
+---
+
 ## Что в репозитории
 
 - `Minecraft.Client/`, `Minecraft.World/` — исходники;
 - `build/` — файлы проектов Visual Studio;
 - `MinecraftConsoles.sln`, `MinecraftPC.sln`, `m2_serial_compile.targets`, `compat/`;
 - `README.md`, `FIXES_M3.md`, `CHANGES.md`, `ANALYSIS.md`, `STREAMING_PLAN.md`, `XBOX360_PORT_REVIEW.md`;
-- `Xbox360-Build/default.xex` — готовая сборка (39 МБ), `README_RU.md`, конфиг Xenia.
+- `Xbox360-Build/default.xex` — текущая TCP PoC-сборка (38 719 488 байт); `Xbox360-Build/default_qnet_backup_20261108.xex` — предыдущая QNet/System Link сборка (39 014 400 байт); `README_RU.md`, конфиг Xenia.
 
 Не включено: `bin/`, `_sdk_install/`, медиа-ассеты (`XboxMedia`, `DurangoMedia`, `PS3Media`, `PSVitaMedia`, `OrbisMedia`, `Windows64Media`, `music`), `repo/`, `src/`, `res/`.
 
 ## Что в релизе
 
-- `MinecraftLCE-XBOX360-runnable.zip` — `default.xex` + `res/` + `README_RU.md` + `xenia-canary.config.toml`, готово к запуску в Xenia.
-- Отдельно `default.xex` (если нужен только бинарник).
+- `MinecraftLCE-Xbox360-TCP-PoC-2026-11-08.zip` — `default.xex` (TCP PoC), `default_qnet_backup_20261108.xex` (QNet/System Link), `res/`, `README_RU.md`, `xenia-canary.config.toml`.
+- Ссылка: https://github.com/geradenis/MinecraftLCE-XBOX360-modded/releases/tag/xbox-tcp-poc-2026-11-08
+- Если TCP-сборка не запускается — используйте `default_qnet_backup_20261108.xex` из архива.
 
 ---
 
