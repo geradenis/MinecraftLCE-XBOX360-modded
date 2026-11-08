@@ -6,6 +6,7 @@
 #include "Minecraft.h"
 #include "User.h"
 #include "..\Minecraft.World\net.minecraft.locale.h"
+#include "..\Minecraft.World\Socket.h"
 
 
 ConnectScreen::ConnectScreen(Minecraft *minecraft, const wstring& ip, int port)
@@ -13,34 +14,21 @@ ConnectScreen::ConnectScreen(Minecraft *minecraft, const wstring& ip, int port)
 	aborted = false;
 //    System.out.println("Connecting to " + ip + ", " + port);
     minecraft->setLevel(NULL);
-#if 1
+#ifdef _WINDOWS64
+	// Direct TCP connect to the dedicated server prototype.
+	Socket *socket = new Socket(ip, port);
+	connection = new ClientConnection(minecraft, socket);
+#else
 	// 4J - removed from separate thread, but need to investigate what we actually need here
     connection = new ClientConnection(minecraft, ip, port);
-    if (aborted) return;
-    connection->send( shared_ptr<PreLoginPacket>( new PreLoginPacket(minecraft->user->name) ) );
-#else
-
-    new Thread() {
-        public void run() {
-
-            try {
-                connection = new ClientConnection(minecraft, ip, port);
-                if (aborted) return;
-                connection.send(new PreLoginPacket(minecraft.user.name));
-            } catch (UnknownHostException e) {
-                if (aborted) return;
-                minecraft.setScreen(new DisconnectedScreen("connect.failed", "disconnect.genericReason", "Unknown host '" + ip + "'"));
-            } catch (ConnectException e) {
-                if (aborted) return;
-                minecraft.setScreen(new DisconnectedScreen("connect.failed", "disconnect.genericReason", e.getMessage()));
-            } catch (Exception e) {
-                if (aborted) return;
-                e.printStackTrace();
-                minecraft.setScreen(new DisconnectedScreen("connect.failed", "disconnect.genericReason", e.toString()));
-            }
-        }
-    }.start();
 #endif
+	if (connection == NULL || !connection->createdOk)
+	{
+		aborted = true;
+		connection = NULL;
+		return;
+	}
+    connection->send( shared_ptr<PreLoginPacket>( new PreLoginPacket(minecraft->user->name) ) );
 }
 
 void ConnectScreen::tick()

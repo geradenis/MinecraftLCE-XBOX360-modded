@@ -4,6 +4,8 @@
 #include "PendingConnection.h"
 #include "PlayerConnection.h"
 #include "ServerPlayer.h"
+#include "PlayerList.h"
+#include "MinecraftServer.h"
 #include "..\Minecraft.World\net.minecraft.network.h"
 #include "..\Minecraft.World\Socket.h"
 #include "..\Minecraft.World\net.minecraft.world.level.h"
@@ -67,11 +69,19 @@ void ServerConnection::tick()
 		vector< shared_ptr<PendingConnection> > tempPending = pending;
 		LeaveCriticalSection(&pending_cs);
 
+		// Accepting a login is expensive: the new player is added to every
+		// chunk and every nearby entity sends an add packet. With 255 bots
+		// connecting at once this used to run in a single tick and stalled the
+		// server for minutes. Spread the accepted logins over ticks.
+		static const int MAX_LOGINS_PER_TICK = 2;
+		int loginsStarted = 0;
 		for (unsigned int i = 0; i < tempPending.size(); i++)
 		{
 			shared_ptr<PendingConnection> uc = tempPending[i];
+			bool allowLogin = loginsStarted < MAX_LOGINS_PER_TICK;
+			if (allowLogin && uc->hasAcceptedLogin()) loginsStarted++;
 	//        try {	// 4J - removed try/catch
-				uc->tick();
+				uc->tick(allowLogin);
 	//        } catch (Exception e) {
 	//            uc.disconnect("Internal server error");
 	//            logger.log(Level.WARNING, "Failed to handle packet: " + e, e);
@@ -90,26 +100,71 @@ void ServerConnection::tick()
 	}
 	LeaveCriticalSection(&pending_cs);
 
+    // Global per-tick chunk budget (the Java server bounds this per player
+    // via PlayerChunkSender acks; without acks we bound the whole server tick
+    // instead). Players with nothing to send do not consume the budget, so
+    // later players are not starved.
+    int chunkBudget;
+    if (players.size() <= 8) chunkBudget = 1000;		// <= 8 players
+    else if (players.size() <= 64) chunkBudget = 64;	// 9..64
+    else if (players.size() <= 128) chunkBudget = 32;	// 65..128
+    else chunkBudget = 24;								// > 128
+
+    // Tearing down a connection waits for its read/write threads. If 255
+    // clients disconnect together, doing all of them in one tick froze the
+    // server for ~25 seconds. Process at most one disconnect per tick; the
+    // rest stay in the list and are handled on following ticks.
+    static const int MAX_DISCONNECTS_PER_TICK = 1;
+    int disconnectsThisTick = 0;
+
     for (unsigned int i = 0; i < players.size(); i++)
 	{
         shared_ptr<PlayerConnection> player = players[i];
-		shared_ptr<ServerPlayer> serverPlayer = player->getPlayer();
-		if( serverPlayer )
+		bool deferDisconnect = false;
+		if (player->isDisconnected())
 		{
-			serverPlayer->doChunkSendingTick(false);
+			if (disconnectsThisTick >= MAX_DISCONNECTS_PER_TICK)
+			{
+				deferDisconnect = true;
+			}
+			else
+			{
+				disconnectsThisTick++;
+			}
 		}
+
+		shared_ptr<ServerPlayer> serverPlayer = player->getPlayer();
+		if( !deferDisconnect && serverPlayer )
+		{
+			int chunksPerTick = 1;
+			if (server != NULL && server->getPlayers() != NULL)
+			{
+				chunksPerTick = server->getPlayers()->getChunksPerTick();
+			}
+			// Large sessions stay conservative: serialising hundreds of
+			// chunks per tick would stall the server thread.
+			if (players.size() > 8 && chunksPerTick > 1) chunksPerTick = 1;
+
+			for (int n = 0; n < chunksPerTick && chunkBudget > 0; ++n)
+			{
+				if (serverPlayer->doChunkSendingTick(false)) chunkBudget--;
+			}
+		}
+		if (!deferDisconnect)
+		{
 //        try {	// 4J - removed try/catch
             player->tick();
 //        } catch (Exception e) {
 //            logger.log(Level.WARNING, "Failed to handle packet: " + e, e);
 //            player.disconnect("Internal server error");
 //        }
-        if (player->done)
-		{
-            players.erase(players.begin()+i);
-			i--;
-        }
-        player->connection->flush();
+			if (player->done)
+			{
+				players.erase(players.begin()+i);
+				i--;
+			}
+		}
+        if (player->connection != NULL) player->connection->flush();
     }
 
 }

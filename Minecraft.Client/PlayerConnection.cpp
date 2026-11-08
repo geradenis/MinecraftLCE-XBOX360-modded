@@ -55,6 +55,11 @@ PlayerConnection::PlayerConnection(MinecraftServer *server, Connection *connecti
 	this->connection = connection;
 	connection->setListener(this);
 	this->player = player;
+	m_cachedNetworkPlayer = NULL;
+	if (connection->getSocket() != NULL)
+	{
+		m_cachedNetworkPlayer = connection->getSocket()->getPlayer();
+	}
 //	player->connection = this;		// 4J - moved out as we can't assign in a ctor
 	InitializeCriticalSection(&done_cs);
 
@@ -73,6 +78,11 @@ PlayerConnection::~PlayerConnection()
 {
 	delete connection;
 	DeleteCriticalSection(&done_cs);
+}
+
+bool PlayerConnection::isDisconnected()
+{
+	return connection != NULL && connection->isDisconnected();
 }
 
 void PlayerConnection::tick()
@@ -1706,7 +1716,9 @@ void PlayerConnection::handleTradeItem(shared_ptr<TradeItemPacket> packet)
 INetworkPlayer *PlayerConnection::getNetworkPlayer()
 {
 	if( connection != NULL && connection->getSocket() != NULL) return connection->getSocket()->getPlayer();
-	else return NULL;
+	// The TCP socket is NULLed when the connection closes. Keep the network
+	// player cached so PlayerList::remove can still free the small id.
+	return m_cachedNetworkPlayer;
 }
 
 bool PlayerConnection::isLocal()

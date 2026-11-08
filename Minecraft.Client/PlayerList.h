@@ -47,6 +47,8 @@ private:
 	GameType *overrideGameMode;
 	bool allowCheatsForAllPlayers;
 	int viewDistance;
+	int simulationDistance;
+	int chunksPerTick;
 
 	int sendAllPlayerInfoIn;
 
@@ -59,6 +61,7 @@ public:
 	void removePlayerFromReceiving(shared_ptr<ServerPlayer> player, bool usePlayerDimension = true, int dimension = 0);
 	void addPlayerToReceiving(shared_ptr<ServerPlayer> player);
 	bool canReceiveAllPackets(shared_ptr<ServerPlayer> player);
+	void updateSameSystemFlags();
 
 public:
 	PlayerList(MinecraftServer *server);
@@ -110,6 +113,8 @@ public:
 	int getMaxPlayers();
 	MinecraftServer *getServer();
 	int getViewDistance();
+	int getSimulationDistance() { return simulationDistance; }
+	int getChunksPerTick();
 	void setOverrideGameMode(GameType *gameMode);
 
 private:

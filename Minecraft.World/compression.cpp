@@ -195,33 +195,49 @@ HRESULT Compression::DecompressLZXRLE(void *pDestination, unsigned int *pDestSiz
 	//static unsigned char rleBuf[staticRleSize];
 	unsigned int rleSize = staticRleSize;
 	unsigned char *dynamicRleBuf = NULL;
+	HRESULT decompressResult = E_FAIL;
 
 	if(*pDestSize > rleSize)
 	{
 		rleSize = *pDestSize;
 		dynamicRleBuf = new unsigned char[rleSize];
-		Decompress(dynamicRleBuf, &rleSize, pSource, SrcSize);
+		decompressResult = Decompress(dynamicRleBuf, &rleSize, pSource, SrcSize);
 		pucIn = (unsigned char *)dynamicRleBuf;
 	}
 	else
 	{
-		Decompress(rleDecompressBuf, &rleSize, pSource, SrcSize);
+		decompressResult = Decompress(rleDecompressBuf, &rleSize, pSource, SrcSize);
 		pucIn = (unsigned char *)rleDecompressBuf;
 	}
 
-	//unsigned char *pucIn = (unsigned char *)rleDecompressBuf;
+	if (FAILED(decompressResult))
+	{
+		// zlib can set rleSize to the required size on Z_BUF_ERROR; never use
+		// that value to walk a buffer that is smaller than it.
+		app.DebugPrintf("DecompressLZXRLE: intermediate decompress failed (0x%x)\n", decompressResult);
+		if(dynamicRleBuf != NULL) delete [] dynamicRleBuf;
+		*pDestSize = 0;
+		LeaveCriticalSection(&rleDecompressLock);
+		return decompressResult;
+	}
+
 	unsigned char *pucEnd = pucIn + rleSize;
 	unsigned char *pucOut = (unsigned char *)pDestination;
+	unsigned char *pucOutEnd = pucOut + *pDestSize;
+	bool overflow = false;
 
 	while( pucIn != pucEnd )
 	{
+		if (pucIn >= pucEnd) break;
 		unsigned char thisOne = *pucIn++;
 		if( thisOne == 255 )
 		{
+			if (pucIn >= pucEnd) { overflow = true; break; }
 			unsigned int count = *pucIn++;
 			if( count < 3 )
 			{
 				count++;
+				if ((size_t)(pucOutEnd - pucOut) < count) { overflow = true; break; }
 				for( unsigned int i = 0; i < count; i++ )
 				{
 					*pucOut++ = 255;
@@ -230,7 +246,9 @@ HRESULT Compression::DecompressLZXRLE(void *pDestination, unsigned int *pDestSiz
 			else
 			{
 				count++;
+				if (pucIn >= pucEnd) { overflow = true; break; }
 				unsigned char data = *pucIn++;
+				if ((size_t)(pucOutEnd - pucOut) < count) { overflow = true; break; }
 				for( unsigned int i = 0; i < count; i++ )
 				{
 					*pucOut++ = data;
@@ -239,6 +257,7 @@ HRESULT Compression::DecompressLZXRLE(void *pDestination, unsigned int *pDestSiz
 		}
 		else
 		{
+			if (pucOut >= pucOutEnd) { overflow = true; break; }
 			*pucOut++ = thisOne;
 		}
 	}
@@ -249,6 +268,11 @@ HRESULT Compression::DecompressLZXRLE(void *pDestination, unsigned int *pDestSiz
 	if(dynamicRleBuf != NULL) delete [] dynamicRleBuf;
 
 	LeaveCriticalSection(&rleDecompressLock);
+	if (overflow)
+	{
+		app.DebugPrintf("DecompressLZXRLE: destination overflow (capacity %u)\n", *pDestSize);
+		return E_FAIL;
+	}
 	return S_OK;
 }
 

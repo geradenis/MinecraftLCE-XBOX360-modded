@@ -135,6 +135,7 @@ public:
 	int countDelayedPackets();
 
 	Socket *getSocket() { return socket; }
+	bool isDisconnected() const { return disconnected; }
 
 private:
 	static int runRead(void* lpParam);

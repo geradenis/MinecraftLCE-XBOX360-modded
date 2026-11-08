@@ -15,6 +15,7 @@ PlayerInfoPacket::PlayerInfoPacket()
 	m_playerColourIndex = -1;
 	m_playerPrivileges = 0;
 	m_entityId = -1;
+	m_playerName = L"";
 }
 
 PlayerInfoPacket::PlayerInfoPacket(BYTE networkSmallId, short playerColourIndex, unsigned int playerPrivileges)
@@ -23,6 +24,7 @@ PlayerInfoPacket::PlayerInfoPacket(BYTE networkSmallId, short playerColourIndex,
 	m_playerColourIndex = playerColourIndex;
 	m_playerPrivileges = playerPrivileges;
 	m_entityId = -1;
+	m_playerName = L"";
 }
 
 PlayerInfoPacket::PlayerInfoPacket(shared_ptr<ServerPlayer> player)
@@ -32,6 +34,7 @@ PlayerInfoPacket::PlayerInfoPacket(shared_ptr<ServerPlayer> player)
 	m_playerColourIndex = player->getPlayerIndex();
 	m_playerPrivileges = player->getAllPlayerGamePrivileges();
 	m_entityId = player->entityId;
+	m_playerName = player->name;
 }
 
 void PlayerInfoPacket::read(DataInputStream *dis)
@@ -40,6 +43,7 @@ void PlayerInfoPacket::read(DataInputStream *dis)
 	m_playerColourIndex = dis->readShort();
 	m_playerPrivileges = dis->readInt();
 	m_entityId = dis->readInt();
+	m_playerName = dis->readUTF();
 }
 
 void PlayerInfoPacket::write(DataOutputStream *dos)
@@ -48,6 +52,7 @@ void PlayerInfoPacket::write(DataOutputStream *dos)
 	dos->writeShort(m_playerColourIndex);
 	dos->writeInt(m_playerPrivileges);
 	dos->writeInt(m_entityId);
+	dos->writeUTF(m_playerName);
 }
 
 void PlayerInfoPacket::handle(PacketListener *listener)
@@ -57,5 +62,5 @@ void PlayerInfoPacket::handle(PacketListener *listener)
 
 int PlayerInfoPacket::getEstimatedSize()
 {
-	return 2 + 2 + 4 + 4;
+	return 2 + 2 + 4 + 4 + 2 + (int)m_playerName.size() * 2;
 }

@@ -4,8 +4,9 @@
 #include "Socket.h"
 #include "ThreadName.h"
 #include "..\Minecraft.Client\ServerConnection.h"
-#include <algorithm>
 #include "..\Minecraft.Client\PS3\PS3Extras\ShutdownManager.h"
+#include "Packet.h"
+#include "DisconnectPacket.h"
 
 // This current socket implementation is for the creation of a single local link. 2 sockets can be created, one for either end of this local
 // link, the end (0 or 1) is passed as a parameter to the ctor.
@@ -48,10 +49,272 @@ void Socket::Initialise(ServerConnection *serverConnection)
 	}
 }
 
+#if defined(_WINDOWS64) || defined(_XBOX)
+bool Socket::s_wsaInit = false;
+
+void Socket::ensureWsa()
+{
+	if (!s_wsaInit)
+	{
+		WSADATA wsaData;
+		WSAStartup(MAKEWORD(2, 2), &wsaData);
+		s_wsaInit = true;
+	}
+}
+
+class Socket::SocketInputStreamTcp : public InputStream
+{
+	SOCKET m_socket;
+	bool m_open;
+public:
+	SocketInputStreamTcp(SOCKET s) : m_socket(s), m_open(true) {}
+
+	virtual int read()
+	{
+		if (!m_open) return -1;
+		char c;
+		int n = recv(m_socket, &c, 1, 0);
+		return (n == 1) ? (int)(unsigned char)c : -1;
+	}
+	virtual int read(byteArray b) { return read(b, 0, b.length); }
+	virtual int read(byteArray b, unsigned int offset, unsigned int length)
+	{
+		if (!m_open) return -1;
+		unsigned int total = 0;
+		while (total < length)
+		{
+			int n = recv(m_socket, (char *)b.data + offset + total, (int)(length - total), 0);
+			if (n <= 0)
+			{
+				m_open = false;
+				return (total > 0) ? (int)total : -1;
+			}
+			total += (unsigned int)n;
+		}
+		return (int)total;
+	}
+	virtual void close()
+	{
+		m_open = false;
+		// Wake up a blocking recv() in the connection read thread. Without
+		// this, Connection::close() waits forever for the read thread to
+		// finish and the client never returns to the main menu.
+		shutdown(m_socket, SD_BOTH);
+	}
+	virtual __int64 skip(__int64 n) { return n; }
+	virtual void flush() {}
+};
+
+class Socket::SocketOutputStreamTcp : public SocketOutputStream
+{
+	SOCKET m_socket;
+	bool m_open;
+public:
+	SocketOutputStreamTcp(SOCKET s) : m_socket(s), m_open(true) {}
+
+	virtual void write(unsigned int b)
+	{
+		if (!m_open) return;
+		char c = (char)b;
+		if (send(m_socket, &c, 1, 0) != 1) m_open = false;
+	}
+	virtual void write(byteArray b) { write(b, 0, b.length); }
+	virtual void write(byteArray b, unsigned int offset, unsigned int length)
+	{
+		if (!m_open) return;
+		unsigned int total = 0;
+		while (total < length)
+		{
+			int n = send(m_socket, (const char *)b.data + offset + total, (int)(length - total), 0);
+			if (n <= 0)
+			{
+				m_open = false;
+				return;
+			}
+			total += (unsigned int)n;
+		}
+	}
+	virtual void writeWithFlags(byteArray b, unsigned int offset, unsigned int length, int flags) { write(b, offset, length); }
+	virtual void close() { m_open = false; }
+	virtual void flush() {}
+};
+
+Socket::Socket(SOCKET tcpSocket, bool serverEnd)
+{
+	ensureWsa();
+	m_isTcp = true;
+	m_tcpSocket = tcpSocket;
+	m_hostServerConnection = false;
+	m_hostLocal = false;
+	m_end = serverEnd ? SOCKET_SERVER_END : SOCKET_CLIENT_END;
+	for (int i = 0; i < 2; i++) m_endClosed[i] = false;
+	m_socketClosedEvent = new C4JThread::Event;
+	createdOk = (tcpSocket != INVALID_SOCKET);
+	networkPlayerSmallId = 0;
+	m_tcpIn = createdOk ? new SocketInputStreamTcp(tcpSocket) : NULL;
+	m_tcpOut = createdOk ? new SocketOutputStreamTcp(tcpSocket) : NULL;
+}
+
+Socket::Socket(const wstring& host, int port)
+{
+	ensureWsa();
+	m_isTcp = true;
+	m_tcpSocket = INVALID_SOCKET;
+	m_hostServerConnection = false;
+	m_hostLocal = false;
+	m_end = SOCKET_CLIENT_END;
+	for (int i = 0; i < 2; i++) m_endClosed[i] = false;
+	m_socketClosedEvent = new C4JThread::Event;
+	createdOk = false;
+	networkPlayerSmallId = 0;
+	m_tcpIn = NULL;
+	m_tcpOut = NULL;
+
+#ifdef _XBOX
+	// Xbox 360 has no GetAddrInfoW; the dedicated server address is an IPv4
+	// literal from server.txt, so inet_addr is sufficient.
+	char hostNarrow[128];
+	int hostLen = 0;
+	while (hostLen < 127 && hostLen < (int)host.size())
+	{
+		hostNarrow[hostLen] = (char)host[hostLen];
+		++hostLen;
+	}
+	hostNarrow[hostLen] = 0;
+
+	sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons((u_short)port);
+	addr.sin_addr.s_addr = inet_addr(hostNarrow);
+	SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (s != INVALID_SOCKET)
+	{
+		if (connect(s, (sockaddr *)&addr, sizeof(addr)) == 0)
+		{
+			m_tcpSocket = s;
+			createdOk = true;
+		}
+		else
+		{
+			closesocket(s);
+		}
+	}
+#else
+	wchar_t portStr[16];
+	swprintf_s(portStr, 16, L"%d", port);
+	addrinfoW hints;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_protocol = IPPROTO_TCP;
+	addrinfoW *result = NULL;
+	if (GetAddrInfoW(host.c_str(), portStr, &hints, &result) == 0)
+	{
+		for (addrinfoW *ptr = result; ptr != NULL; ptr = ptr->ai_next)
+		{
+			SOCKET s = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
+			if (s == INVALID_SOCKET) continue;
+			if (connect(s, ptr->ai_addr, (int)ptr->ai_addrlen) == 0)
+			{
+				m_tcpSocket = s;
+				createdOk = true;
+				break;
+			}
+			closesocket(s);
+		}
+		FreeAddrInfoW(result);
+	}
+#endif
+	if (createdOk)
+	{
+		m_tcpIn = new SocketInputStreamTcp(m_tcpSocket);
+		m_tcpOut = new SocketOutputStreamTcp(m_tcpSocket);
+	}
+}
+
+static DWORD WINAPI TcpListenerThread(LPVOID param)
+{
+	int port = (int)(INT_PTR)param;
+	WSADATA wsa;
+	WSAStartup(MAKEWORD(2, 2), &wsa);
+	SOCKET ls = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	addr.sin_port = htons((u_short)port);
+	if (::bind(ls, (sockaddr *)&addr, sizeof(addr)) != 0) return 0;
+	if (listen(ls, SOMAXCONN) != 0) return 0;
+
+	FILE *f = NULL;
+#ifdef _WINDOWS64
+	fopen_s(&f, "H:\\Temp\\tcp_server_accept.txt", "a");
+#endif
+	while (true)
+	{
+		SOCKET s = accept(ls, NULL, NULL);
+		if (s == INVALID_SOCKET) break;
+		if (f) { fprintf(f, "accepted=%llu\n", (unsigned long long)s); fflush(f); }
+		Socket *sock = new Socket(s, true);
+		if (g_NetworkManager.AddTcpPlayer(sock, L"TCPPlayer", false, false))
+		{
+			Socket::addIncomingSocket(sock);
+		}
+		else
+		{
+			if (f) { fprintf(f, "rejected: no free small id\n"); fflush(f); }
+			// Tell the client why it was rejected instead of silently
+			// resetting the connection.
+			Socket::SocketOutputStream *out = sock->getOutputStream(true);
+			if (out != NULL)
+			{
+				DataOutputStream dos(out);
+				Packet::writePacket(shared_ptr<Packet>(new DisconnectPacket(DisconnectPacket::eDisconnect_ServerFull)), &dos);
+				dos.flush();
+			}
+			sock->close(true);
+			delete sock;
+		}
+	}
+	if (f) fclose(f);
+	return 0;
+}
+
+void Socket::startTcpListener(int port)
+{
+	CreateThread(NULL, 0, TcpListenerThread, (LPVOID)(INT_PTR)port, 0, NULL);
+}
+
+Socket::~Socket()
+{
+	// The TCP streams are owned by the socket. Connection deletes its
+	// DataInputStream wrapper but not the underlying stream.
+	delete m_tcpIn;
+	m_tcpIn = NULL;
+	delete m_tcpOut;
+	m_tcpOut = NULL;
+}
+
+void Socket::shutdownTcp()
+{
+	if (m_isTcp && m_tcpSocket != INVALID_SOCKET)
+	{
+		shutdown(m_tcpSocket, SD_BOTH);
+	}
+}
+#endif
+
 Socket::Socket(bool response)
 {
 	m_hostServerConnection = true;
 	m_hostLocal = true;
+#if defined(_WINDOWS64) || defined(_XBOX)
+	m_isTcp = false;
+	m_tcpSocket = INVALID_SOCKET;
+	m_tcpIn = NULL;
+	m_tcpOut = NULL;
+#endif
 	if( response )
 	{
 		m_end = SOCKET_SERVER_END;
@@ -76,6 +339,12 @@ Socket::Socket(INetworkPlayer *player, bool response /* = false*/, bool hostLoca
 {
 	m_hostServerConnection = false;
 	m_hostLocal = hostLocal;
+#if defined(_WINDOWS64) || defined(_XBOX)
+	m_isTcp = false;
+	m_tcpSocket = INVALID_SOCKET;
+	m_tcpIn = NULL;
+	m_tcpOut = NULL;
+#endif
 
 	for( int i = 0; i < 2; i++ )
 	{
@@ -155,6 +424,9 @@ void Socket::addIncomingSocket(Socket *socket)
 
 InputStream *Socket::getInputStream(bool isServerConnection)
 {
+#if defined(_WINDOWS64) || defined(_XBOX)
+	if (m_isTcp) return m_tcpIn;
+#endif
 	if( !m_hostServerConnection )
 	{
 		if( m_hostLocal )
@@ -181,6 +453,14 @@ InputStream *Socket::getInputStream(bool isServerConnection)
 
 void Socket::setSoTimeout(int a )
 {
+#if defined(_WINDOWS64) || defined(_XBOX)
+	if (m_isTcp && m_tcpSocket != INVALID_SOCKET)
+	{
+		DWORD ms = (DWORD)a;
+		setsockopt(m_tcpSocket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&ms, sizeof(ms));
+		return;
+	}
+#endif
 }
 
 void Socket::setTrafficClass( int a )
@@ -189,6 +469,9 @@ void Socket::setTrafficClass( int a )
 
 Socket::SocketOutputStream *Socket::getOutputStream(bool isServerConnection)
 {
+#if defined(_WINDOWS64) || defined(_XBOX)
+	if (m_isTcp) return m_tcpOut;
+#endif
 	if( !m_hostServerConnection )
 	{
 		if( m_hostLocal )
@@ -215,6 +498,21 @@ Socket::SocketOutputStream *Socket::getOutputStream(bool isServerConnection)
 
 bool Socket::close(bool isServerConnection)
 {
+#if defined(_WINDOWS64) || defined(_XBOX)
+	if (m_isTcp)
+	{
+		if (m_tcpSocket != INVALID_SOCKET)
+		{
+			shutdown(m_tcpSocket, SD_BOTH);
+			closesocket(m_tcpSocket);
+			m_tcpSocket = INVALID_SOCKET;
+		}
+		m_endClosed[m_end] = true;
+		if (m_socketClosedEvent != NULL) m_socketClosedEvent->Set();
+		createdOk = false;
+		return true;
+	}
+#endif
 	bool allClosed = false;
 	if( m_hostLocal )
 	{

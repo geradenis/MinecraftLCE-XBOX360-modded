@@ -5,14 +5,22 @@
 #include "ThreadName.h"
 #include "compression.h"
 #include "..\Minecraft.Client\PS3\PS3Extras\ShutdownManager.h"
+#include "..\Minecraft.Client\Common\Network\NetworkPlayerInterface.h"
 
-// This should always be enabled, except for debugging use
-#ifndef _DEBUG
+// Timeout disconnects are important for TCP: a client that loses its network
+// without closing the socket must not stay in the world forever. Keep this
+// enabled in debug builds too so the timeout path is actually exercised.
+#ifndef CONNECTION_ENABLE_TIMEOUT_DISCONNECT
 #define CONNECTION_ENABLE_TIMEOUT_DISCONNECT 1
 #endif
 
 int Connection::readThreads = 0;
 int Connection::writeThreads = 0;
+
+// Client-side flag: a TCP peer disconnected. The renderer uses it to stop
+// rebuilding chunks so the main thread can reach the exit action promptly.
+// Only set for client connections (never for the server's player connections).
+volatile bool g_tcpPeerDisconnected = false;
 
 int Connection::readSizes[256];
 int Connection::writeSizes[256];
@@ -49,6 +57,14 @@ Connection::~Connection()
 	running = false;
 	if( dis ) dis->close();		// The input stream needs closed before the readThread, or the readThread
 								// may get stuck whilst blocking waiting on a read
+#if defined(_WINDOWS64) || defined(_XBOX)
+	if( socket ) socket->shutdownTcp();	// also wakes a write thread blocked in send()
+#endif
+	// The read/write loops wait on these events with a 100 ms timeout. Wake
+	// them immediately so disconnecting a player does not cost ~100 ms (and
+	// hundreds of players do not look like ghosts while their threads sleep).
+	if (m_hWakeReadThread) m_hWakeReadThread->Set();
+	if (m_hWakeWriteThread) m_hWakeWriteThread->Set();
 	readThread->WaitForCompletion(INFINITE);
 	writeThread->WaitForCompletion(INFINITE);
 
@@ -72,6 +88,16 @@ Connection::~Connection()
 	}
 	delete dis;
 	dis = NULL;
+
+	if( socket )
+	{
+		INetworkPlayer *socketPlayer = socket->getPlayer();
+		if( socketPlayer != NULL ) socketPlayer->SetSocket(NULL);
+		bool wasTcp = socket->isTcp();
+		socket->close(false);
+		if( wasTcp ) delete socket;
+		socket = NULL;
+	}
 }
 
 Connection::Connection(Socket *socket, const wstring& id, PacketListener *packetListener) // throws IOException
@@ -199,7 +225,14 @@ bool Connection::writeTick()
 
 		LeaveCriticalSection(&writeLock);
 
-		Packet::writePacket(packet, bufferedDos);
+		if (socket != NULL && socket->isTcp())
+		{
+			Packet::writeTcpFrame(packet, bufferedDos, byteArrayDos, baos);
+		}
+		else
+		{
+			Packet::writePacket(packet, bufferedDos);
+		}
 		
 
 #ifndef _CONTENT_PACKAGE
@@ -234,7 +267,13 @@ bool Connection::writeTick()
 
 		// If the shouldDelay flag is still set at this point then we want to write it to QNet as a single packet with priority flags
 		// Otherwise just buffer the packet with other outgoing packets as the java game did
-		if(packet->shouldDelay)
+		if (socket != NULL && socket->isTcp())
+		{
+			// TCP has no QNet priority flags; keep the packet on the same
+			// framed byte stream as everything else so ordering is preserved.
+			Packet::writeTcpFrame(packet, bufferedDos, byteArrayDos, baos);
+		}
+		else if(packet->shouldDelay)
 		{
 			Packet::writePacket(packet, byteArrayDos);
 
@@ -290,7 +329,17 @@ bool Connection::readTick()
 
 	//try {
 
-	shared_ptr<Packet> packet = Packet::readPacket(dis, packetListener->isServerPacketListener());
+	// Windows64 TCP has no message boundaries. Use the framed reader so a
+	// damaged packet cannot shift every following packet in the stream.
+	shared_ptr<Packet> packet;
+	if (socket != NULL && socket->isTcp())
+	{
+		packet = Packet::readTcpFrame(dis, packetListener->isServerPacketListener());
+	}
+	else
+	{
+		packet = Packet::readPacket(dis, packetListener->isServerPacketListener());
+	}
 
 	if (packet != NULL)
 	{
@@ -308,8 +357,27 @@ bool Connection::readTick()
 //		printf("Con:0x%x readTick close EOS\n",this);
 
 		// 4J Stu - Remove this line
-		// Fix for #10410 - UI: If the player is removed from a splitscreened host’s game, the next game that player joins will produce a message stating that the host has left.
+		// Fix for #10410 - UI: If the player is removed from a splitscreened hostï¿½s game, the next game that player joins will produce a message stating that the host has left.
 		//close(DisconnectPacket::eDisconnect_EndOfStream);
+
+		// TCP: readPacket returns NULL when the peer closed the socket (EOF).
+		// Mark the connection disconnected so Connection::tick() calls
+		// onDisconnect on the main thread. That removes the player from the
+		// player list and broadcasts the entity removal, instead of leaving a
+		// frozen ghost player behind.
+		//
+		// Do NOT call close() here: it waits for this read thread to finish
+		// and would deadlock.
+		if (socket != NULL && socket->isTcp())
+		{
+			if (!packetListener->isServerPacketListener())
+			{
+				g_tcpPeerDisconnected = true;
+			}
+			disconnected = true;
+			disconnectReason = DisconnectPacket::eDisconnect_EndOfStream;
+			disconnectReasonObjects = NULL;
+		}
 	}
 
 
@@ -377,9 +445,18 @@ void Connection::close(DisconnectPacket::eDisconnectReason reason, ...)
 //	CreateThread(NULL, 0, runClose, this, 0, &closeThreadID);
 
 	running = false;
+	if (!packetListener->isServerPacketListener())
+	{
+		g_tcpPeerDisconnected = true;
+	}
 
 	if( dis ) dis->close();		// The input stream needs closed before the readThread, or the readThread
 						// may get stuck whilst blocking waiting on a read
+#if defined(_WINDOWS64) || defined(_XBOX)
+	if( socket ) socket->shutdownTcp();	// also wakes a write thread blocked in send()
+#endif
+	if (m_hWakeReadThread) m_hWakeReadThread->Set();
+	if (m_hWakeWriteThread) m_hWakeWriteThread->Set();
 
 	// Make sure that the read & write threads are dead before we go and kill the streams that they depend on
 	readThread->WaitForCompletion(INFINITE);
@@ -387,6 +464,7 @@ void Connection::close(DisconnectPacket::eDisconnectReason reason, ...)
 
 	delete dis;
 	dis = NULL;
+
 	if( bufferedDos )
 	{
 		bufferedDos->close();
@@ -402,7 +480,11 @@ void Connection::close(DisconnectPacket::eDisconnectReason reason, ...)
 	}
 	if( socket )
 	{
+		INetworkPlayer *socketPlayer = socket->getPlayer();
+		if( socketPlayer != NULL ) socketPlayer->SetSocket(NULL);
+		bool wasTcp = socket->isTcp();
 		socket->close(packetListener->isServerPacketListener());
+		if( wasTcp ) delete socket;
 		socket = NULL;
 	}
 }
@@ -456,17 +538,56 @@ void Connection::tick()
 	EnterCriticalSection(&incoming_cs);
 	// 4J Stu - If disconnected, then we shouldn't process incoming packets
 	std::vector< shared_ptr<Packet> > packetsToHandle;
+	// Movement is state, not an event. A client (or a test bot) that sends
+	// faster than the tick rate can queue hundreds of MovePlayerPackets per
+	// tick; handling all of them is wasted work and used to make a single
+	// tick take minutes at 200+ players. Keep the newest one and process the
+	// other packet types in order.
+	bool coalesceMoves = packetListener->isServerPacketListener();
+	shared_ptr<MovePlayerPacket> pendingPos = nullptr;
+	shared_ptr<MovePlayerPacket> pendingRot = nullptr;
 	while (!disconnected && !g_NetworkManager.IsLeavingGame() && g_NetworkManager.IsInSession() && !incoming.empty() && max-- >= 0)
 	{
 		shared_ptr<Packet> packet = incoming.front();
-		packetsToHandle.push_back(packet);
 		incoming.pop();
+		shared_ptr<MovePlayerPacket> move = dynamic_pointer_cast<MovePlayerPacket>(packet);
+		if (coalesceMoves && move != nullptr && (move->hasPos || move->hasRot))
+		{
+			// Keep the newest position and rotation separately; a later Rot
+			// packet must not discard an earlier Pos update. The newest
+			// packet is enough: intermediate positions are not replayed.
+			if (move->hasPos) pendingPos = move;
+			if (move->hasRot) pendingRot = move;
+		}
+		else
+		{
+			packetsToHandle.push_back(packet);
+		}
+	}
+	if (pendingPos != nullptr)
+	{
+		// Process the latest position before the other queued packets so
+		// actions/chat see the current position.
+		packetsToHandle.insert(packetsToHandle.begin(), pendingPos);
+		if (pendingRot != nullptr && pendingRot != pendingPos)
+		{
+			packetsToHandle.insert(packetsToHandle.begin() + 1, pendingRot);
+		}
+	}
+	else if (pendingRot != nullptr)
+	{
+		packetsToHandle.insert(packetsToHandle.begin(), pendingRot);
 	}
 	LeaveCriticalSection(&incoming_cs);
 
 	// MGH - moved the packet handling outside of the incoming_cs block, as it was locking up sometimes when disconnecting
 	for(int i=0; i<packetsToHandle.size();i++)
 	{
+		// If the peer disconnected while these packets were queued (TCP EOF or
+		// a kick), do not keep processing a potentially large chunk backlog
+		// before onDisconnect runs. This was making the client take tens of
+		// seconds to return to the menu after a kick.
+		if (disconnected) break;
 		PIXBeginNamedEvent(0,"Handling packet %d\n",packetsToHandle[i]->getId());
 		packetsToHandle[i]->handle(packetListener);
 		PIXEndNamedEvent();
@@ -482,14 +603,17 @@ void Connection::tick()
 	// 4J - split the following condition (used to be disconnect && iscoming.empty()) so we can wrap the access in a critical section
 	if (disconnected)
 	{
+		// The read thread may have queued packets before it saw EOF. The
+		// drain loop above deliberately stops when disconnected, so those
+		// packets would keep incoming non-empty forever and onDisconnect
+		// would never run (the ghost-player bug). Drop the stale queue and
+		// notify the listener immediately.
 		EnterCriticalSection(&incoming_cs);
-		bool empty = incoming.empty();
+		while (!incoming.empty()) incoming.pop();
 		LeaveCriticalSection(&incoming_cs);
-		if( empty )
-		{
-			packetListener->onDisconnect(disconnectReason, disconnectReasonObjects);
-			disconnected = false; // 4J added - don't keep sending this every tick
-		}
+		app.DebugPrintf("Connection::tick: calling onDisconnect reason=%d\n", (int)disconnectReason);
+		packetListener->onDisconnect(disconnectReason, disconnectReasonObjects);
+		disconnected = false; // 4J added - don't keep sending this every tick
 	}
 }
 

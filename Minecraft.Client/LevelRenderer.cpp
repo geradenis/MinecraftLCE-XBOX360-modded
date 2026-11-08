@@ -1809,6 +1809,13 @@ void LevelRenderer::renderAdvancedClouds(float alpha)
 
 bool LevelRenderer::updateDirtyChunks()
 {
+#if defined(_WINDOWS64) || defined(_XBOX)
+	// When a TCP peer disconnects, stop scheduling chunk rebuilds. The read
+	// thread sets this as soon as EOF is seen; without it the main thread can
+	// spend a long time rebuilding chunks before it processes onDisconnect.
+	extern volatile bool g_tcpPeerDisconnected;
+	if (g_tcpPeerDisconnected) return false;
+#endif
 #ifdef _LARGE_WORLDS
 	std::list< std::pair<ClipChunk *, int> > nearestClipChunks;
 #endif
@@ -2070,7 +2077,7 @@ bool LevelRenderer::updateDirtyChunks()
 		for(; index >=0; --index)
 		{
 			bool bAtomic = false;
-			if((veryNearCount > 0))
+			if((veryNearCount > 0) && !g_tcpPeerDisconnected)
 				bAtomic = true;		//MGH -  if veryNearCount, then we're trying to rebuild atomically, so do it all on the main thread
 
 			if( bAtomic || (index == 0) ) 

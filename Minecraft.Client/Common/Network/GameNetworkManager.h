@@ -6,6 +6,10 @@ using namespace std;
 #include "NetworkPlayerInterface.h"
 #ifdef _XBOX
 #include "..\..\Xbox\Network\PlatformNetworkManagerXbox.h"
+// The TCP stub is also compiled for Xbox 360. When server.txt is present,
+// CGameNetworkManager::Initialise selects it instead of the QNet manager so
+// the Xbox client can join the dedicated TCP server.
+#include "PlatformNetworkManagerStub.h"
 #elif defined __PS3__ || defined __ORBIS__ || defined __PSVITA__
 #include "..\..\Common\Network\Sony\PlatformNetworkManagerSony.h"
 #elif defined _DURANGO
@@ -31,6 +35,7 @@ class CGameNetworkManager
 {
 #ifdef _XBOX
 	friend class CPlatformNetworkManagerXbox;
+	friend class CPlatformNetworkManagerStub;
 #elif defined __PS3__ || defined __ORBIS__ || defined __PSVITA__
 	friend class CPlatformNetworkManagerSony;
 #elif defined _DURANGO
@@ -88,6 +93,9 @@ public:
 	void			SetPrivateGame(bool isPrivate);
 	bool			IsPrivateGame();
 	void			HostGame(int localUsersMask, bool bOnlineGame, bool bIsPrivate, unsigned char publicSlots = MINECRAFT_NET_MAX_PLAYERS, unsigned char privateSlots = 0);
+	bool			AddTcpPlayer(Socket *socket, const wstring& name, bool local, bool host);
+	void			RegisterTcpPlayer(unsigned char smallId, const wstring& name, bool host);
+	void			RemoveTcpPlayer(unsigned char smallId);
 	bool			IsHost();
 	bool			IsInStatsEnabledSession();
 

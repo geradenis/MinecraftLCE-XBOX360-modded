@@ -27,6 +27,7 @@ BlockRegionUpdatePacket::BlockRegionUpdatePacket()
 	ys = 0;
 	zs = 0;
 	bIsFullChunk = false;
+	valid = true;
 }
 
 BlockRegionUpdatePacket::BlockRegionUpdatePacket(int x, int y, int z, int xs, int ys, int zs, Level *level)
@@ -40,6 +41,7 @@ BlockRegionUpdatePacket::BlockRegionUpdatePacket(int x, int y, int z, int xs, in
 	this->ys = ys;
 	this->zs = zs;
 	bIsFullChunk = false;
+	valid = true;
 	levelIdx = ( ( level->dimension->id == 0 ) ? 0 : ( (level->dimension->id == -1) ? 1 : 2 ) );
 
 	// 4J - if we are compressing a full chunk, re-order the blocks so that they compress better
@@ -112,12 +114,23 @@ void BlockRegionUpdatePacket::read(DataInputStream *dis) //throws IOException
 		buffer = byteArray(bufferSize);
 		unsigned int outputSize = buffer.length;
 
+		valid = true;
 		if( success )
 		{
-			Compression::getCompression()->DecompressLZXRLE( buffer.data, &outputSize, compressedBuffer.data, size);
+			HRESULT hr = Compression::getCompression()->DecompressLZXRLE( buffer.data, &outputSize, compressedBuffer.data, size);
+			if (FAILED(hr) || outputSize != buffer.length)
+			{
+				// A malformed/oversized chunk used to overflow the destination
+				// buffer and then trip an assert (which opened a modal dialog
+				// and left the heap corrupted). Drop it instead.
+				valid = false;
+				app.DebugPrintf("BlockRegionUpdatePacket: bad chunk (%d,%d,%d) expected %u got %u hr=0x%x\n",
+					x, y, z, buffer.length, outputSize, hr);
+			}
 		}
 		else
 		{
+			valid = false;
 			app.DebugPrintf("Not decompressing packet that wasn't fully read\n");
 		}
 
@@ -125,7 +138,6 @@ void BlockRegionUpdatePacket::read(DataInputStream *dis) //throws IOException
 	
 
 		delete [] compressedBuffer.data;
-		assert(buffer.length == outputSize);
 	}
 }
 

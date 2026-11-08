@@ -30,7 +30,8 @@ private:
 public:
     PendingConnection(MinecraftServer *server, Socket *socket, const wstring& id);
 	~PendingConnection();
-    void tick();
+    void tick(bool allowLogin = true);
+    bool hasAcceptedLogin() const { return acceptedLogin != NULL; }
     void disconnect(DisconnectPacket::eDisconnectReason reason);
     virtual void handlePreLogin(shared_ptr<PreLoginPacket> packet);
     virtual void handleLogin(shared_ptr<LoginPacket> packet);

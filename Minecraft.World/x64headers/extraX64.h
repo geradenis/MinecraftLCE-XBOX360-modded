@@ -21,7 +21,9 @@ const int XUSER_MAX_COUNT = 1;
 const int MINECRAFT_NET_MAX_PLAYERS = 4;
 #else
 const int XUSER_MAX_COUNT = 4;
-const int MINECRAFT_NET_MAX_PLAYERS = 8;
+// Windows64 dedicated-server prototype: small ids are bytes, so 255 players
+// (host small id 0 + clients 1..254) fit in one session.
+const int MINECRAFT_NET_MAX_PLAYERS = 255;
 #endif
 
 

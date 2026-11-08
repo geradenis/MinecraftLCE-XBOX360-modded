@@ -2,6 +2,16 @@
 #include <xrnm.h>
 #include <queue>
 #include <qnet.h>
+#if defined(_WINDOWS64)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#elif defined(_XBOX)
+// Xbox 360 Winsock (WSA) API. Xenia implements WSAStartup/socket/connect/
+// send/recv, so the same TCP transport can be used by the Xbox client.
+#include <winsockx.h>
+#pragma comment(lib, "xnet.lib")
+#endif
 #include "InputStream.h"
 #include "OutputStream.h"
 
@@ -108,8 +118,33 @@ private:
 	static ServerConnection *s_serverConnection;
 
 	BYTE networkPlayerSmallId;
+
+#if defined(_WINDOWS64) || defined(_XBOX)
+	// TCP transport for the dedicated server / direct connect. The Xbox build
+	// uses it when a server.txt with the server address is present.
+	bool m_isTcp;
+	SOCKET m_tcpSocket;
+	class SocketInputStreamTcp;
+	class SocketOutputStreamTcp;
+	SocketInputStreamTcp *m_tcpIn;
+	SocketOutputStreamTcp *m_tcpOut;
+	static bool s_wsaInit;
+	static void ensureWsa();
+#endif
+
 public:	
 	C4JThread::Event* m_socketClosedEvent;
+
+#if defined(_WINDOWS64) || defined(_XBOX)
+	Socket(SOCKET tcpSocket, bool serverEnd);
+	Socket(const wstring& host, int port);
+	static void startTcpListener(int port);
+	bool isTcp() const { return m_isTcp; }
+	// Unblock any thread blocked in recv()/send() without invalidating the
+	// handle (Socket::close() still owns the handle).
+	void shutdownTcp();
+	~Socket();
+#endif
 
 	INetworkPlayer *getPlayer();
 	void setPlayer(INetworkPlayer *player);

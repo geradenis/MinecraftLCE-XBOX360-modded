@@ -124,6 +124,7 @@ public:
 	MinecraftServer();
 	~MinecraftServer();
 private:
+	friend class ServerConsole;
 	// 4J Added - LoadSaveDataThreadParam
 	bool initServer(__int64 seed, NetworkGameInitData *initData, DWORD initSettings, bool findSeed);
 	void postProcessTerminate(ProgressRenderer *mcprogress);

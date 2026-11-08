@@ -27,6 +27,7 @@
 #include "DeathScreen.h"
 #include "ErrorScreen.h"
 #include "TitleScreen.h"
+#include "ConnectScreen.h"
 #include "InventoryScreen.h"
 #include "InBedChatScreen.h"
 #include "AchievementPopup.h"
@@ -408,7 +409,7 @@ void Minecraft::init()
 
 	if (connectToIp != L"")	// 4J - was NULL comparison
 	{
-		//        setScreen(new ConnectScreen(this, connectToIp, connectToPort));		// 4J TODO - put back in
+		setScreen(new ConnectScreen(this, connectToIp, connectToPort));		// 4J TODO - put back in
 	}
 	else
 	{
@@ -4303,6 +4304,13 @@ void Minecraft::startAndConnectTo(const wstring& name, const wstring& sid, const
 	// 4J - was new Minecraft(frame, canvas, NULL, 854, 480, fullScreen);
 
 	minecraft = new Minecraft(NULL, NULL, NULL, 1280, 720, fullScreen);
+
+#ifdef _WINDOWS64
+	// Dedicated-server prototype: the TCP connection is opened by the UI
+	// Join Game path or by the --join auto-join hook. Do not use the legacy
+	// ConnectScreen here - it would open a second, immediately abandoned TCP
+	// connection and waste a server small id.
+#endif
 
 	/* - 4J - removed
 	{

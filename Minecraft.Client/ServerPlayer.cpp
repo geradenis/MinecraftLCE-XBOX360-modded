@@ -5,6 +5,7 @@
 #include "MinecraftServer.h"
 #include "EntityTracker.h"
 #include "PlayerConnection.h"
+#include "..\Minecraft.World\Connection.h"
 #include "Settings.h"
 #include "PlayerList.h"
 #include "MultiPlayerLevel.h"
@@ -43,6 +44,8 @@ ServerPlayer::ServerPlayer(MinecraftServer *server, Level *level, const wstring&
 	latency = 0;
 	wonGame = false;
 	m_enteredEndExitPortal = false;
+	m_receivesAllPackets = false;
+	m_hasSameSystemPlayers = false;
 	lastCarried = ItemInstanceArray(5);
 	viewDistance = 10;
 
@@ -129,14 +132,15 @@ void ServerPlayer::flagEntitiesToBeRemoved(unsigned int *flags, bool *removedFou
 	if( ( *removedFound ) == false )
 	{
 		*removedFound = true;
-		memset(flags, 0, 2048/32);
+		// 2048 bits = 256 bytes (the old 2048/32 only cleared 64 bytes).
+		memset(flags, 0, Entity::SMALL_ID_COUNT/8);
 	}
 
 	AUTO_VAR(it, entitiesToRemove.begin() );
 	for( AUTO_VAR(it, entitiesToRemove.begin()); it != entitiesToRemove.end(); it++ )
 	{
 		int index = *it;
-		if( index < 2048 )
+		if( index < Entity::SMALL_ID_COUNT )
 		{
 			unsigned int i = index / 32;
 			unsigned int j = index % 32;
@@ -304,8 +308,9 @@ void ServerPlayer::doTickA()
 }
 
 // 4J - split off the chunk sending bit of the tick here from ::doTick so we can do this exactly once per player per server tick
-void ServerPlayer::doChunkSendingTick(bool dontDelayChunks)
+bool ServerPlayer::doChunkSendingTick(bool dontDelayChunks)
 {
+	bool sentAnyChunk = false;
 //	printf("[%d] %s: sendChunks: %d, empty: %d\n",tickCount, connection->getNetworkPlayer()->GetUID().getOnlineID(),sendChunks,chunksToSend.empty());
 	if (!chunksToSend.empty())
 	{
@@ -337,6 +342,14 @@ void ServerPlayer::doChunkSendingTick(bool dontDelayChunks)
 		{
             bool okToSend = false;
 
+#ifdef _WINDOWS64
+			// TCP has no QNet slow queue, so chunks should not be throttled
+			// by the QNet queue-size checks.
+			bool tcpConnection = connection->connection != NULL && connection->connection->getSocket() != NULL && connection->connection->getSocket()->isTcp();
+#else
+			bool tcpConnection = false;
+#endif
+
 //                if (dist < 32 * 32) okToSend = true;
 			if( connection->isLocal() )
 			{
@@ -352,7 +365,7 @@ void ServerPlayer::doChunkSendingTick(bool dontDelayChunks)
 //					g_NetworkManager.GetHostPlayer()->GetSendQueueSizeBytes( NULL, true ),
 //					connection->done);
 	
-				if( dontDelayChunks || 
+				if( dontDelayChunks || tcpConnection || 
 					(canSendOnSlowQueue &&
 					(connection->countDelayedPackets() < 4 )&&
 #ifdef _XBOX_ONE
@@ -408,9 +421,24 @@ void ServerPlayer::doChunkSendingTick(bool dontDelayChunks)
 
 						if( packet->shouldDelay == true )
 						{
-							// Other than the first packet we always want these initial chunks to be sent over
-							// QNet at a lower priority
-							connection->queueSend( packet );
+#ifdef _WINDOWS64
+							// TCP has no QNet slow queue; sending chunks through
+							// the delayed queue adds seconds of startup latency.
+							bool tcpSocket = connection->connection != NULL && connection->connection->getSocket() != NULL && connection->connection->getSocket()->isTcp();
+#else
+							bool tcpSocket = false;
+#endif
+							if( tcpSocket )
+							{
+								packet->shouldDelay = false;
+								connection->send( packet );
+							}
+							else
+							{
+								// Other than the first packet we always want these initial chunks to be sent over
+								// QNet at a lower priority
+								connection->queueSend( packet );
+							}
 						}
 						else
 						{
@@ -420,6 +448,7 @@ void ServerPlayer::doChunkSendingTick(bool dontDelayChunks)
 						sentChunks.insert(nearest);
 
 						chunkDataSent = true;
+						sentAnyChunk = true;
 					}
 				}
 				else
@@ -453,6 +482,7 @@ void ServerPlayer::doChunkSendingTick(bool dontDelayChunks)
             }
         }
     }
+	return sentAnyChunk;
 }
 
 void ServerPlayer::doTickB(bool ignorePortal)

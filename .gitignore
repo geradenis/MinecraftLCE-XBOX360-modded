@@ -44,3 +44,4 @@ _sdk_install/
 .vs/
 repo/
 src/
+dist/

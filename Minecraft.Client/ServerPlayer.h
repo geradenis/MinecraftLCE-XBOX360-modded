@@ -68,7 +68,7 @@ public:
 	virtual bool isPlayerVersusPlayer();
     void doTick(bool sendChunks, bool dontDelayChunks = false, bool ignorePortal = false);
 	void doTickA();
-	void doChunkSendingTick(bool dontDelayChunks);
+	bool doChunkSendingTick(bool dontDelayChunks);
 	void doTickB(bool ignorePortal);
 	virtual void changeDimension(int i);
 private:
@@ -92,6 +92,8 @@ public:
 	int latency;
 	bool wonGame;
 	bool m_enteredEndExitPortal; // 4J Added
+	bool m_receivesAllPackets;   // O(1) cache of PlayerList::canReceiveAllPackets
+	bool m_hasSameSystemPlayers; // cached: another player on the same console/system
 
 private:
 	void nextContainerCounter();

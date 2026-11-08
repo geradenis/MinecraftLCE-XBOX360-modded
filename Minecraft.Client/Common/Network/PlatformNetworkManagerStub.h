@@ -6,9 +6,51 @@ using namespace std;
 #include "PlatformNetworkManagerInterface.h"
 #include "SessionInfo.h"
 
-class CPlatformNetworkManagerStub : public CPlatformNetworkManager
+// TCP player used by the Windows64 dedicated-server prototype. The console
+// network layer normally wraps IQNetPlayer; this implementation carries a
+// plain TCP Socket instead.
+class NetworkPlayerTcp : public INetworkPlayer
 {
-	friend class CGameNetworkManager;
+public:
+	NetworkPlayerTcp(const wstring& name, unsigned char smallId, int userIndex, bool local, bool host)
+		: m_name(name), m_smallId(smallId), m_userIndex(userIndex), m_local(local), m_host(host), m_socket(NULL), m_uid(0) {}
+	virtual ~NetworkPlayerTcp() {}
+
+	virtual unsigned char GetSmallId() { return m_smallId; }
+	virtual void SendData(INetworkPlayer *player, const void *pvData, int dataSize, bool lowPriority) {}
+	virtual bool IsSameSystem(INetworkPlayer *player) { return player == this; }
+	virtual int GetSendQueueSizeBytes(INetworkPlayer *player, bool lowPriority) { return 0; }
+	virtual int GetSendQueueSizeMessages(INetworkPlayer *player, bool lowPriority) { return 0; }
+	virtual int GetCurrentRtt() { return 0; }
+	virtual bool IsHost() { return m_host; }
+	virtual bool IsGuest() { return false; }
+	virtual bool IsLocal() { return m_local; }
+	virtual int GetSessionIndex() { return 0; }
+	virtual bool IsTalking() { return false; }
+	virtual bool IsMutedByLocalUser(int userIndex) { return false; }
+	virtual bool HasVoice() { return false; }
+	virtual bool HasCamera() { return false; }
+	virtual int GetUserIndex() { return m_userIndex; }
+	virtual void SetSocket(Socket *pSocket) { m_socket = pSocket; }
+	virtual Socket *GetSocket() { return m_socket; }
+	virtual const wchar_t *GetOnlineName() { return m_name.c_str(); }
+	virtual wstring GetDisplayName() { return m_name; }
+	virtual PlayerUID GetUID() { return m_uid; }
+	virtual void SetSmallId(unsigned char id) { m_smallId = id; }
+	virtual void SetOnlineName(const wstring& name) { m_name = name; }
+
+public:
+	wstring m_name;
+	unsigned char m_smallId;
+	int m_userIndex;
+	bool m_local;
+	bool m_host;
+	Socket *m_socket;
+	PlayerUID m_uid;
+};
+
+class CPlatformNetworkManagerStub : public CPlatformNetworkManager
+{	friend class CGameNetworkManager;
 public:
 	virtual bool Initialise(CGameNetworkManager *pGameNetworkManager, int flagIndexSize);
 	virtual void Terminate();
@@ -150,14 +192,26 @@ private:
 	void removeNetworkPlayer(IQNetPlayer *pQNetPlayer);
 	static INetworkPlayer *getNetworkPlayer(IQNetPlayer *pQNetPlayer);
 
+	// TCP players for the Windows64 dedicated-server prototype.
+	bool m_bTcpClient;
+	vector<NetworkPlayerTcp *> m_tcpPlayers;
+	// Removed players are kept alive until shutdown: UI code may still hold
+	// INetworkPlayer pointers when a client disconnects.
+	vector<NetworkPlayerTcp *> m_retiredTcpPlayers;
+	CRITICAL_SECTION m_tcpPlayersCS;
+	wstring m_tcpServerIp;
+	int m_tcpServerPort;
+
 	virtual void SetSessionTexturePackParentId( int id );
 	virtual void SetSessionSubTexturePackId( int id );
 	virtual void Notify(int ID, ULONG_PTR Param);
 
 public:
 	virtual vector<FriendSessionInfo *> *GetSessionList(int iPad, int localPlayers, bool partyOnly);
-	virtual bool GetGameSessionInfo(int iPad, SessionID sessionId,FriendSessionInfo *foundSession);
-	virtual void SetSessionsUpdatedCallback( void (*SessionsUpdatedCallback)(LPVOID pParam), LPVOID pSearchParam );
+	virtual bool AddTcpPlayer(Socket *socket, const wstring& name, bool local, bool host);
+	virtual void RegisterTcpPlayer(unsigned char smallId, const wstring& name, bool host);
+	virtual void RemoveTcpPlayer(unsigned char smallId);
+	virtual bool GetGameSessionInfo(int iPad, SessionID sessionId,FriendSessionInfo *foundSession);	virtual void SetSessionsUpdatedCallback( void (*SessionsUpdatedCallback)(LPVOID pParam), LPVOID pSearchParam );
 	virtual void GetFullFriendSessionInfo( FriendSessionInfo *foundSession, void (* FriendSessionUpdatedFn)(bool success, void *pParam), void *pParam );
 	virtual void ForceFriendsSessionRefresh();
 

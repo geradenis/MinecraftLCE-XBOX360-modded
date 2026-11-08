@@ -15,6 +15,9 @@ class PlayerInfoPacket : public Packet, public enable_shared_from_this<PlayerInf
 		short m_playerColourIndex;
 		unsigned int m_playerPrivileges;
 		int m_entityId;
+		// Windows64 TCP prototype: the player list UI needs the name of every
+		// session player, even when the entity is outside tracking range.
+		wstring m_playerName;
 
 		PlayerInfoPacket();
 		//PlayerInfoPacket(const wstring &name, bool add, int latency);

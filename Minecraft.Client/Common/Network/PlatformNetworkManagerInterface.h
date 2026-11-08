@@ -69,6 +69,9 @@ public:
 	virtual bool IsAddingPlayer() = 0;
 
 	virtual void HostGame(int localUsersMask, bool bOnlineGame, bool bIsPrivate, unsigned char publicSlots = MINECRAFT_NET_MAX_PLAYERS, unsigned char privateSlots = 0) = 0;
+	virtual bool AddTcpPlayer(Socket *socket, const wstring& name, bool local, bool host) { return false; }
+	virtual void RegisterTcpPlayer(unsigned char smallId, const wstring& name, bool host) {}
+	virtual void RemoveTcpPlayer(unsigned char smallId) {}
 	virtual int  JoinGame(FriendSessionInfo *searchResult, int dwLocalUsersMask, int dwPrimaryUserIndex ) = 0;
 	virtual void CancelJoinGame() {};
 	virtual bool SetLocalGame(bool isLocal) = 0;

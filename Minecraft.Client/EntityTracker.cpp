@@ -75,11 +75,18 @@ void EntityTracker::addEntity(shared_ptr<Entity> e, int range, int updateInterva
     if (range > maxRange) range = maxRange;
     if (entityMap.find(e->entityId) != entityMap.end())
 	{
-		assert(false);	// Entity already tracked
+		// A duplicate id can happen when loading an older save or when a
+		// client reconnects. Never terminate the Debug build for this; keep
+		// the existing tracker and log the collision.
+		app.DebugPrintf("EntityTracker: duplicate entity id %d (%ls), keeping existing tracker\n",
+			e->entityId, e->getAName().c_str());
+		return;
 	}
-	if( e->entityId >= 2048 )
+	if( e->entityId >= Entity::SMALL_ID_COUNT )
 	{
-		__debugbreak();
+		app.DebugPrintf("EntityTracker: entity id %d outside small-id range (%d), not tracked\n",
+			e->entityId, Entity::SMALL_ID_COUNT);
+		return;
 	}
     shared_ptr<TrackedEntity> te = shared_ptr<TrackedEntity>( new TrackedEntity(e, range, updateInterval, trackDeltas) );
 	entities.insert(te);
@@ -130,6 +137,19 @@ void EntityTracker::tick()
 	// range extended to include entities visible by any other player on the system
 	// Fix for #11194 - Gameplay: Host player and their split-screen avatars can become invisible and invulnerable to client.
 	MinecraftServer *server = MinecraftServer::getInstance();
+	bool anySameSystem = false;
+	for( unsigned int i = 0; i < server->getPlayers()->players.size(); i++ )
+	{
+		if (server->getPlayers()->players[i]->m_hasSameSystemPlayers)
+		{
+			anySameSystem = true;
+			break;
+		}
+	}
+
+	// On a TCP server every player is its own system, so this whole
+	// O(players^2) splitscreen extension loop can be skipped.
+	if (anySameSystem)
 	for( unsigned int i = 0; i < server->getPlayers()->players.size(); i++ )
 	{
 		shared_ptr<ServerPlayer> ep = server->getPlayers()->players[i];			

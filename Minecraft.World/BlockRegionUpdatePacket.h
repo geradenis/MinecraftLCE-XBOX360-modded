@@ -13,6 +13,7 @@ public:
     byteArray buffer;
 	int levelIdx;
 	bool bIsFullChunk; // 4J Added
+	bool valid;        // false when decompression size does not match the packet
 
 private:
 	int size;

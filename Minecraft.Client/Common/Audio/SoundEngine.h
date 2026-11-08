@@ -92,6 +92,9 @@ class SoundEngine : public ConsoleSoundEngine
 public:
 	SoundEngine();
 	virtual void destroy();
+	// Windows64 dedicated-server / test hook: skip all Miles calls.
+	static void SetDisabled(bool disabled) { s_disableSound = disabled; }
+	static bool IsDisabled() { return s_disableSound; }
 #ifdef _DEBUG
 	void GetSoundName(char *szSoundName,int iSound);
 #endif
@@ -116,6 +119,8 @@ public:
 	void playMusicUpdate();
 
 private:
+	static bool s_disableSound;
+
 	float getMasterMusicVolume();
 	// platform specific functions
 #ifdef __PS3__

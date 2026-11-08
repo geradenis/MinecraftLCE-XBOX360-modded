@@ -22,7 +22,16 @@ void NetworkPlayerXbox::SendData(INetworkPlayer *player, const void *pvData, int
 
 bool NetworkPlayerXbox::IsSameSystem(INetworkPlayer *player)
 {
+#ifdef _WINDOWS64
+	// The Windows64 dedicated-server prototype also has NetworkPlayerTcp
+	// objects in the session. Casting one of those to NetworkPlayerXbox would
+	// read garbage, so treat any non-Xbox player as a different system.
+	NetworkPlayerXbox *xboxPlayer = dynamic_cast<NetworkPlayerXbox *>(player);
+	if (xboxPlayer == NULL) return false;
+	return ( m_qnetPlayer->IsSameSystem(xboxPlayer->m_qnetPlayer) == TRUE );
+#else
 	return ( m_qnetPlayer->IsSameSystem(((NetworkPlayerXbox *)player)->m_qnetPlayer) == TRUE );
+#endif
 }
 
 int NetworkPlayerXbox::GetSendQueueSizeBytes( INetworkPlayer *player, bool lowPriority )

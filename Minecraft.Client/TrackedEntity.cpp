@@ -305,6 +305,28 @@ void TrackedEntity::broadcast(shared_ptr<Packet> packet)
 {
 	if( Packet::canSendToAnyClient( packet ) )
 	{
+		// The dedup loop below is only needed for splitscreen systems. On a
+		// TCP server every player is its own system; running the nested
+		// seenBy x sentTo loop made movement broadcasts O(players^3) and
+		// stalled the tick at 200+ players.
+		bool anySameSystem = false;
+		for( AUTO_VAR(it, seenBy.begin()); it != seenBy.end(); it++ )
+		{
+			if( (*it)->m_hasSameSystemPlayers )
+			{
+				anySameSystem = true;
+				break;
+			}
+		}
+		if( !anySameSystem )
+		{
+			for( AUTO_VAR(it, seenBy.begin()); it != seenBy.end(); it++ )
+			{
+				(*it)->connection->send(packet);
+			}
+			return;
+		}
+
 		// 4J-PB - due to the knockback on a player being hit, we need to send to all players, but limit the network traffic here to players that have not already had it sent to their system
 		vector< shared_ptr<ServerPlayer> > sentTo;
 
@@ -415,7 +437,7 @@ TrackedEntity::eVisibility TrackedEntity::isVisible(EntityTracker *tracker, shar
 	// 4J - added. Try and find other players who are in the same dimension as this one and on the same machine, and extend our visibility
 	// so things are consider visible to this player if they are near the other one. This is because we only send entity tracking info to
 	// players who canReceiveAllPackets().
-	if(!bVisible)
+	if(!bVisible && sp->m_hasSameSystemPlayers)
 	{
 		MinecraftServer *server = MinecraftServer::getInstance();
 		INetworkPlayer *thisPlayer = sp->connection->getNetworkPlayer();
@@ -465,6 +487,26 @@ void TrackedEntity::updatePlayer(EntityTracker *tracker, shared_ptr<ServerPlayer
 {
     if (sp == e) return;
 
+	// Fast reject for players that are far away and are not already tracking
+	// this entity. isVisible() would otherwise do the same distance test and,
+	// for players without splitscreen siblings, skip the old O(players) scan.
+	// This is the common case for hundreds of independent TCP players.
+	if (!sp->m_hasSameSystemPlayers)
+	{
+		double xd = sp->x - xpu;
+		double zd = sp->z - zpu;
+		int playersRange = range;
+		if (playersRange > TRACKED_ENTITY_MINIMUM_VIEW_DISTANCE)
+		{
+			playersRange -= sp->getPlayerViewDistanceModifier();
+		}
+		if ((xd < -playersRange || xd > playersRange || zd < -playersRange || zd > playersRange)
+			&& seenBy.find(sp) == seenBy.end())
+		{
+			return;
+		}
+	}
+
 	eVisibility visibility = this->isVisible(tracker, sp);
 	
     if (	visibility == eVisibility_SeenAndVisible
@@ -478,14 +520,8 @@ void TrackedEntity::updatePlayer(EntityTracker *tracker, shared_ptr<ServerPlayer
 		yap = e->yd;
 		zap = e->zd;
 
-		shared_ptr<Player> plr = dynamic_pointer_cast<Player>(e);
-		if (plr != NULL)
-		{
-			app.DebugPrintf( "TrackedEntity:: Player '%ls' is now visible to player '%ls', %s.\n",
-				plr->name.c_str(), sp->name.c_str(),
-				(e->riding==NULL?"not riding minecart":"in minecart")
-				);
-		}
+		// The per-pair visibility message flooded the server log at 255
+		// players and slowed logins down; it is diagnostic only.
 
 		// 4J Stu brought forward to fix when Item Frames
 		if (!e->getEntityData()->isEmpty() && !(dynamic_pointer_cast<AddMobPacket>(packet)))

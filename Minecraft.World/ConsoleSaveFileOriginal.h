@@ -22,6 +22,15 @@ private:
 	// is enough for compressed console saves.
 	static const unsigned int CSF_PAGE_SIZE = 64 * 1024;
 	static const unsigned int MAX_PAGE_COUNT = 4 * 1024; // 256 MB virtual allocation
+#elif defined(_WINDOWS64)
+	// PC/hosting build: the console 2 GB save-heap cap is artificial. Reserve
+	// a large virtual range (committed only as the save grows) and let the
+	// 64-bit OS decide how much physical RAM/pagefile to use. The save file
+	// format still uses 32-bit offsets internally, so a single save is
+	// practically limited to 4 GB; process RAM for chunks/entities is not
+	// capped by this reservation.
+	static const unsigned int CSF_PAGE_SIZE = 64 * 1024;
+	static const unsigned int MAX_PAGE_COUNT = 1024 * 1024; // 64 GB virtual allocation
 #elif defined(_LARGE_WORLDS)
 	static const unsigned int CSF_PAGE_SIZE = 64 * 1024;
 	static const unsigned int MAX_PAGE_COUNT = 32 * 1024; // 2GB virtual allocation

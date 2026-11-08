@@ -25,6 +25,7 @@ public:
 private:
 	MinecraftServer *server;
     shared_ptr<ServerPlayer> player;
+    INetworkPlayer *m_cachedNetworkPlayer;
     int tickCount;
     int aboveGroundTickCount;
 
@@ -42,6 +43,7 @@ public:
 	PlayerConnection(MinecraftServer *server, Connection *connection, shared_ptr<ServerPlayer> player);
 	~PlayerConnection();
     void tick();
+    bool isDisconnected();
     void disconnect(DisconnectPacket::eDisconnectReason reason);
 
 private:

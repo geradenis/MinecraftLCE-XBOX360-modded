@@ -2,10 +2,16 @@
 //#include "Minecraft.h"
 
 #include <ctime>
+#ifdef _WINDOWS64
+#include <intrin.h>
+#endif
 
 #include "Options.h"
 #include "MinecraftServer.h"
 #include "ConsoleInput.h"
+#ifdef _WINDOWS64
+#include "Windows64\ServerConsole.h"
+#endif
 #include "PlayerList.h"
 #include "ServerLevel.h"
 #include "DerivedServerLevel.h"
@@ -173,6 +179,13 @@ bool MinecraftServer::initServer(__int64 seed, NetworkGameInitData *initData, DW
 #if 1
 		connection = new ServerConnection(this);
 		Socket::Initialise(connection);	// 4J - added
+#ifdef _WINDOWS64
+		// Dedicated-server prototype: accept TCP clients on the port from
+		// server.properties (default 25565).
+		int tcpPort = settings->getInt(L"server-port", 25565);
+		app.DebugPrintf("TCP server listening on port %d\n", tcpPort);
+		Socket::startTcpListener(tcpPort);
+#endif
 #else
 		// 4J - removed
         InetAddress localAddress = null;
@@ -234,6 +247,9 @@ bool MinecraftServer::initServer(__int64 seed, NetworkGameInitData *initData, DW
 
 		ProgressRenderer *mcprogress = Minecraft::GetInstance()->progressRenderer;
 		mcprogress->progressStart(IDS_PROGRESS_INITIALISING_SERVER);
+#ifdef _WINDOWS64
+		ServerConsole::PrintA("[Server] Initialising server...");
+#endif
 
 		if( findSeed )
 		{
@@ -261,7 +277,13 @@ bool MinecraftServer::initServer(__int64 seed, NetworkGameInitData *initData, DW
         }
 #endif
 //        logger.info("Preparing level \"" + levelName + "\"");
+#ifdef _WINDOWS64
+		ServerConsole::PrintA("[Server] Preparing level...");
+#endif
         m_bLoaded = loadLevel(new McRegionLevelStorageSource(File(L".")), levelName, seed, pLevelType, initData);
+#ifdef _WINDOWS64
+		ServerConsole::PrintA("[Server] Level loaded.");
+#endif
 //        logger.info("Done (" + (System.nanoTime() - levelNanoTime) + "ns)! For help, type \"help\" or \"?\"");
 
 		// 4J delete passed in save data now - this is only required for the tutorial which is loaded by passing data directly in rather than using the storage manager
@@ -273,6 +295,10 @@ bool MinecraftServer::initServer(__int64 seed, NetworkGameInitData *initData, DW
 		}
 
 		g_NetworkManager.ServerReady();	// 4J added
+#ifdef _WINDOWS64
+		ServerConsole::PrintA("[Server] Ready. Listening on port %d. Type 'help' for commands.", settings->getInt(L"server-port", 25565));
+		ServerConsole::PrintServerAddresses();
+#endif
         return m_bLoaded;
 
 }
@@ -501,10 +527,16 @@ bool MinecraftServer::loadLevel(LevelStorageSource *storageSource, const wstring
 	if( levels[0]->isNew )
 	{
 		mcprogress->progressStage(IDS_PROGRESS_GENERATING_SPAWN_AREA);
+#ifdef _WINDOWS64
+		ServerConsole::PrintA("[Server] Generating spawn area...");
+#endif
 	}
 	else
 	{
 		mcprogress->progressStage(IDS_PROGRESS_LOADING_SPAWN_AREA);
+#ifdef _WINDOWS64
+		ServerConsole::PrintA("[Server] Loading spawn area...");
+#endif
 	}
 	app.SetGameHostOption( eGameHostOption_HasBeenInCreative, gameType == GameType::CREATIVE || levels[0]->getHasBeenInCreative() );
 	app.SetGameHostOption( eGameHostOption_Structures, levels[0]->isGenerateMapFeatures() );
@@ -581,6 +613,9 @@ bool MinecraftServer::loadLevel(LevelStorageSource *storageSource, const wstring
 					int total = halfsidelen * halfsidelen * 4;
 					int pos = z + halfsidelen + ( ( x + halfsidelen ) * 2 * halfsidelen );
 					mcprogress->progressStagePercentage((pos) * 100 / total);
+#ifdef _WINDOWS64
+					ServerConsole::Progress("Generating spawn area", (pos) * 100 / total);
+#endif
 					level->cache->create(x,z, true);	// 4J - added parameter to disable postprocessing here
 
 					if( System::currentTimeMillis() - lastStorageTickTime > 50 )
@@ -617,6 +652,9 @@ bool MinecraftServer::loadLevel(LevelStorageSource *storageSource, const wstring
                         int pos = (x + r) * twoRPlusOne + (z + 1);
 //                        setProgress(L"Preparing spawn area", (pos) * 100 / total);
 						mcprogress->progressStagePercentage((pos+r) * 100 / total);
+#ifdef _WINDOWS64
+						ServerConsole::Progress(levels[0]->isNew ? "Generating spawn area" : "Loading spawn area", (pos+r) * 100 / total);
+#endif
 //                        lastTime = now;
                     }
 					static int count = 0;
@@ -882,6 +920,12 @@ void MinecraftServer::stopServer()
 
 	connection->stop();
 
+	// Drop the per-level redstone-toggle queues before deleting the levels.
+	// Level::~Level also calls removeLevelReferences(), but clearing the
+	// global map first avoids touching a stale level key during shutdown
+	// (this used to crash with an empty server).
+	NotGateTile::clearAllLevelReferences();
+
 	app.DebugPrintf("Stopping server\n");
 //    logger.info("Stopping server");
 	// 4J-PB - If the primary player has signed out, then don't attempt to save anything
@@ -1119,6 +1163,7 @@ void MinecraftServer::run(__int64 seed, void *lpParameter)
 				{
 //					int tickcount = 0;
 //					__int64 beforeall = System::currentTimeMillis();
+					int ticksThisLoop = 0;
 					while (unprocessedTime > MS_PER_TICK)
 					{
 						unprocessedTime -= MS_PER_TICK;
@@ -1161,6 +1206,21 @@ void MinecraftServer::run(__int64 seed, void *lpParameter)
 //						{
 //							app.DebugPrintf("Not considering cycling: %d - %d -> %d > %d\n",time, s_slowQueueLastTime, (time - s_slowQueueLastTime), (2*MINECRAFT_SERVER_SLOW_QUEUE_DELAY));
 //						}
+
+						// Do not try to catch up an unbounded backlog. A single
+						// 70-second tick used to be followed by up to 40 more
+						// ticks, which made the overload spiral worse. Five
+						// ticks is enough to absorb a normal short hitch.
+						if (++ticksThisLoop >= 5)
+						{
+							if (unprocessedTime > MS_PER_TICK)
+							{
+								app.DebugPrintf("SERVER: dropping %lld ms of catch-up backlog\n",
+									(long long)unprocessedTime);
+								unprocessedTime = 0;
+							}
+							break;
+						}
 					}
 //					__int64 afterall = System::currentTimeMillis();
 //					PIXReportCounter(L"Server time all",(float)(afterall-beforeall));
@@ -2182,6 +2242,9 @@ static void RunChunkTour(MinecraftServer *server)
 
 void MinecraftServer::tick()
 {
+#ifdef _WINDOWS64
+	ULONGLONG tickStartMs = GetTickCount64();
+#endif
     vector<wstring> toRemove;
     for (AUTO_VAR(it, ironTimers.begin()); it != ironTimers.end(); it++ )
 	{
@@ -2311,6 +2374,21 @@ void MinecraftServer::tick()
 //    } catch (Exception e) {
 //        logger.log(Level.WARNING, "Unexpected exception while parsing console command", e);
 //    }
+
+#ifdef _WINDOWS64
+	// Periodic performance line for the console/headless log. This is the
+	// wall time of the whole server tick, so it includes level, entity and
+	// network work.
+	static ULONGLONG lastStatsMs = 0;
+	ULONGLONG nowMs = GetTickCount64();
+	if (nowMs - lastStatsMs >= 10000)
+	{
+		lastStatsMs = nowMs;
+		int playerCount = (players != NULL) ? (int)players->players.size() : 0;
+		ServerConsole::PrintA("[stats] players=%d tick=%llums", playerCount,
+			(unsigned long long)(nowMs - tickStartMs));
+	}
+#endif
 }
 
 void MinecraftServer::handleConsoleInput(const wstring& msg, ConsoleInputSource *source)
@@ -2320,11 +2398,15 @@ void MinecraftServer::handleConsoleInput(const wstring& msg, ConsoleInputSource 
 
 void MinecraftServer::handleConsoleInputs()
 {
+#ifdef _WINDOWS64
+	ServerConsole::ProcessPendingCommands();
+#endif
     while (consoleInput.size() > 0)
 	{
 		AUTO_VAR(it, consoleInput.begin());
         ConsoleInput *input = *it;
 		consoleInput.erase(it);
+		delete input;
 //        commands->handleCommand(input);		// 4J - removed - TODO - do we want equivalent of console commands?
     }
 }
@@ -2343,6 +2425,10 @@ void MinecraftServer::main(__int64 seed, void *lpParameter)
 
 void MinecraftServer::HaltServer(bool bPrimaryPlayerSignedOut)
 {
+#ifdef _WINDOWS64
+	app.DebugPrintf("MinecraftServer::HaltServer signedOut=%d caller=%p\n",
+		(int)bPrimaryPlayerSignedOut, _ReturnAddress());
+#endif
 	s_bServerHalted = true;
 	if( server != NULL )
 	{

@@ -5,6 +5,7 @@ class Packet;
 class PacketListener;
 class DataInputStream;
 class DataOutputStream;
+class ByteArrayOutputStream;
 
 #define PACKET_ENABLE_STAT_TRACKING 0
 
@@ -53,6 +54,18 @@ public:
 	static unordered_set<int> serverReceivedPackets;
 	static unordered_set<int> sendToAnyClientPackets;
 
+	// Set by readUtf when a string length is invalid (negative or too long).
+	// Packet::readPacket checks it and drops the connection instead of
+	// asserting: this is almost always a client/server build mismatch or a
+	// desynchronised packet stream.
+	// The Xbox 360 XDK compiler (VS2010) has no thread_local; the Xbox client
+	// has a single TCP connection, so a plain static is sufficient there.
+#if defined(_XBOX)
+	static bool s_readError;
+#else
+	static thread_local bool s_readError;
+#endif
+
 	// 4J Stu - Added the sendToAnyClient param so we can limit some packets to be only sent to one player on a system
 	// 4J Stu - Added renderStats param for use in debugging
 	static void map(int id, bool receiveOnClient, bool receiveOnServer, bool sendToAnyClient, bool renderStats, const type_info& clazz, packetCreateFn );
@@ -93,6 +106,18 @@ private :
 public:
 	static shared_ptr<Packet> readPacket(DataInputStream *dis, bool isServer);
 	static void writePacket(shared_ptr<Packet> packet, DataOutputStream *dos);
+
+	// TCP framing for the Windows64 transport. QNet preserved message
+	// boundaries; raw TCP does not. Every packet is prefixed with a small
+	// header (magic, version, payload length) so a damaged packet can be
+	// rejected without shifting every following packet in the stream.
+	static const int TCP_FRAME_MAGIC = 0x4C434546; // "LCEF"
+	static const int TCP_FRAME_VERSION = 1;
+	static const int TCP_FRAME_MAX_PAYLOAD = 32 * 1024 * 1024;
+	static shared_ptr<Packet> readTcpFrame(DataInputStream *dis, bool isServer);
+	static void writeTcpFrame(shared_ptr<Packet> packet, DataOutputStream *dos,
+		DataOutputStream *payloadDos, ByteArrayOutputStream *payload);
+
 	static void writeUtf(const wstring& value, DataOutputStream *dos);
 	static wstring readUtf(DataInputStream *dis, int maxLength);
 	virtual void read(DataInputStream *dis) = 0; // throws IOException = 0; TODO 4J JEV, should this declare a throws?

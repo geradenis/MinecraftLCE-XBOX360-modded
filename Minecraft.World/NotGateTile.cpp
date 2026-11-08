@@ -10,11 +10,22 @@ unordered_map<Level *, deque<NotGateTile::Toggle> *> NotGateTile::recentToggles 
 // version does, we are also removing any references to levels that we are storing when they hit their dtor.
 void NotGateTile::removeLevelReferences(Level *level)
 {
-	if( recentToggles.find(level) != recentToggles.end() )
+	if (recentToggles.empty()) return;
+	AUTO_VAR(it, recentToggles.find(level));
+	if (it != recentToggles.end())
 	{
-		delete recentToggles[level];
-		recentToggles.erase(level);
+		delete it->second;
+		recentToggles.erase(it);
 	}
+}
+
+void NotGateTile::clearAllLevelReferences()
+{
+	for (AUTO_VAR(it, recentToggles.begin()); it != recentToggles.end(); ++it)
+	{
+		delete it->second;
+	}
+	recentToggles.clear();
 }
 
 bool NotGateTile::isToggledTooFrequently(Level *level, int x, int y, int z, bool add)

@@ -14,6 +14,10 @@
 #include "..\..\Minecraft.Client\Minecraft.h"
 #include "..\ClientConnection.h"
 #include "..\MultiPlayerLocalPlayer.h"
+#ifdef _WINDOWS64
+#include "..\Windows64\ServerConsole.h"
+#include "..\Windows64\ServerCrashHandler.h"
+#endif
 #include "..\..\Minecraft.Client\LocalPlayer.h"
 #include "..\..\Minecraft.World\Player.h"
 #include "..\..\Minecraft.World\Inventory.h"
@@ -178,7 +182,9 @@ CMinecraftApp::CMinecraftApp()
 
 	m_uiGameHostSettings=0;
 
-	ZeroMemory(m_playerColours,MINECRAFT_NET_MAX_PLAYERS);
+	// 0xFF means "no player": small id 0 is the host, so zero-filled slots
+	// would otherwise be treated as the host's colour slot.
+	memset(m_playerColours, 0xFF, MINECRAFT_NET_MAX_PLAYERS);
 
 	m_iDLCOfferC=0;
 	m_bAllDLCContentRetrieved=true;
@@ -241,6 +247,10 @@ void CMinecraftApp::DebugPrintf(const char *szFormat, ...)
 	vsnprintf(buf, sizeof(buf), szFormat, ap);
 	va_end(ap);
 	OutputDebugStringA(buf);
+#ifdef _WINDOWS64
+	ServerConsole::PrintA("%s", buf);
+	ServerCrashHandler::LogDebug(buf);
+#endif
 #endif
 
 }

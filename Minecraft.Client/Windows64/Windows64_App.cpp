@@ -95,7 +95,12 @@ void CConsoleMinecraftApp::TemporaryCreateGameStart()
 	app.SetGameHostOption(eGameHostOption_BedrockFog,1);
 
 	app.SetGameHostOption(eGameHostOption_GameType,GameType::CREATIVE->getId() ); // LevelSettings::GAMETYPE_SURVIVAL
+#ifdef _WINDOWS64
+	extern bool g_flatWorld;
+	app.SetGameHostOption(eGameHostOption_LevelType, g_flatWorld ? 1 : 0 );
+#else
 	app.SetGameHostOption(eGameHostOption_LevelType, 0 );
+#endif
 	app.SetGameHostOption(eGameHostOption_Structures, 1 );
 	app.SetGameHostOption(eGameHostOption_BonusChest, 0 );
 
@@ -118,6 +123,19 @@ void CConsoleMinecraftApp::TemporaryCreateGameStart()
 	param->hellScale = HELL_LEVEL_MAX_SCALE;
 
 	param->settings = app.GetGameHostOption( eGameHostOption_All );
+
+#ifdef _WINDOWS64
+	extern bool g_dedicatedServer;
+	if (g_dedicatedServer)
+	{
+		// Dedicated server: no local host player and no UI loading scene.
+		// The server thread owns the world; the console is the interface.
+		C4JThread *serverThread = new C4JThread(&CGameNetworkManager::RunNetworkGameThreadProc, param, "DedicatedServer", 256 * 1024);
+		serverThread->SetProcessor(CPU_CORE_SERVER);
+		serverThread->Run();
+		return;
+	}
+#endif
 
 	g_NetworkManager.FakeLocalPlayerJoined();
 

@@ -66,7 +66,10 @@ void CGameNetworkManager::Initialise()
 	ServerReadyCreate( false );
 	int flagIndexSize = LevelRenderer::getFlagIndexSize();		// M2: independent of the renderer ring
 #ifdef _XBOX
-	s_pPlatformNetworkManager = new CPlatformNetworkManagerXbox();
+	// Direct TCP client PoC: the Xbox build always uses the TCP-capable stub.
+	// The server address is compiled into PlatformNetworkManagerStub.cpp for
+	// now; a real console build should read it from storage or a UI.
+	s_pPlatformNetworkManager = new CPlatformNetworkManagerStub();
 #elif defined __PS3__ || defined __ORBIS__ || defined __PSVITA__
 	s_pPlatformNetworkManager = new CPlatformNetworkManagerSony();
 #elif defined _DURANGO
@@ -184,6 +187,15 @@ bool CGameNetworkManager::_RunNetworkGame(LPVOID lpParameter)
 
 bool	CGameNetworkManager::StartNetworkGame(Minecraft *minecraft, LPVOID lpParameter)
 {
+#ifdef _WINDOWS64
+	// PC nickname override (--name/--nick). On consoles the profile
+	// gamertag remains the name.
+	extern wstring g_playerName;
+	if (!g_playerName.empty() && minecraft != NULL && minecraft->user != NULL)
+	{
+		minecraft->user->name = g_playerName;
+	}
+#endif
 #ifdef _DURANGO
 	ProfileManager.SetDeferredSignoutEnabled(true);
 #endif
@@ -273,6 +285,18 @@ bool	CGameNetworkManager::StartNetworkGame(Minecraft *minecraft, LPVOID lpParame
 		return false;
 	}
 
+#ifdef _WINDOWS64
+	extern bool g_dedicatedServer;
+	if (g_dedicatedServer)
+	{
+		// Dedicated server: do not create a local host ClientConnection, so
+		// no host ServerPlayer is added to the world. Console commands and
+		// TCP clients are the only way to interact with the world.
+		app.SetGameStarted(true);
+		return true;
+	}
+#endif
+
 	// PRIMARY PLAYER
 
 	vector<ClientConnection *> createdConnections;
@@ -285,6 +309,12 @@ bool	CGameNetworkManager::StartNetworkGame(Minecraft *minecraft, LPVOID lpParame
 	else
 	{
 		INetworkPlayer *pNetworkPlayer = g_NetworkManager.GetLocalPlayerByUserIndex(ProfileManager.GetLockedProfile());
+		if(pNetworkPlayer == NULL)
+		{
+			// The Xbox UI does not always lock the profile to the pad that
+			// started the join; fall back to the primary pad.
+			pNetworkPlayer = g_NetworkManager.GetLocalPlayerByUserIndex(ProfileManager.GetPrimaryPad());
+		}
 		if(pNetworkPlayer == NULL)
 		{
 			MinecraftServer::HaltServer();
@@ -651,10 +681,34 @@ bool CGameNetworkManager::JoinGameFromInviteInfo( int userIndex, int userMask, c
 	return s_pPlatformNetworkManager->JoinGameFromInviteInfo( userIndex, userMask, pInviteInfo );
 }
 
+bool CGameNetworkManager::AddTcpPlayer(Socket *socket, const wstring& name, bool local, bool host)
+{
+	if (s_pPlatformNetworkManager != NULL)
+	{
+		return s_pPlatformNetworkManager->AddTcpPlayer(socket, name, local, host);
+	}
+	return false;
+}
+
+void CGameNetworkManager::RegisterTcpPlayer(unsigned char smallId, const wstring& name, bool host)
+{
+	if (s_pPlatformNetworkManager != NULL)
+	{
+		s_pPlatformNetworkManager->RegisterTcpPlayer(smallId, name, host);
+	}
+}
+
+void CGameNetworkManager::RemoveTcpPlayer(unsigned char smallId)
+{
+	if (s_pPlatformNetworkManager != NULL)
+	{
+		s_pPlatformNetworkManager->RemoveTcpPlayer(smallId);
+	}
+}
+
 CGameNetworkManager::eJoinGameResult CGameNetworkManager::JoinGame(FriendSessionInfo *searchResult, int localUsersMask)
 {
-	app.SetTutorialMode( false );
-	g_NetworkManager.SetLocalGame(false);
+	app.SetTutorialMode( false );	g_NetworkManager.SetLocalGame(false);
 
 	int primaryUserIndex = ProfileManager.GetLockedProfile();
 

@@ -510,9 +510,11 @@ void IUIScene_PauseMenu::_ExitWorld(LPVOID lpParameter)
 		{
 			exitReasonStringId = IDS_EXITING_GAME;
 			pMinecraft->progressRenderer->progressStartNoAbort( IDS_EXITING_GAME );
+			app.DebugPrintf("EXIT_WORLD: disconnecting levels\n");
 			if( pMinecraft->levels[0] != NULL ) pMinecraft->levels[0]->disconnect();
 			if( pMinecraft->levels[1] != NULL ) pMinecraft->levels[1]->disconnect();
 			if( pMinecraft->levels[2] != NULL ) pMinecraft->levels[2]->disconnect();
+			app.DebugPrintf("EXIT_WORLD: levels disconnected\n");
 		}
 
 		// 4J Stu - This only does something if we actually have a server, so don't need to do any other checks
@@ -524,7 +526,9 @@ void IUIScene_PauseMenu::_ExitWorld(LPVOID lpParameter)
 		saveStats = false;
 
 		// 4J Stu - Leave the session once the disconnect packet has been sent
+		app.DebugPrintf("EXIT_WORLD: calling LeaveGame\n");
 		g_NetworkManager.LeaveGame(FALSE);
+		app.DebugPrintf("EXIT_WORLD: LeaveGame returned (inSession=%d)\n", (int)g_NetworkManager.IsInSession());
 	}
 	else
 	{
@@ -620,10 +624,12 @@ void IUIScene_PauseMenu::_ExitWorld(LPVOID lpParameter)
 
 	// Fix for #13259 - CRASH: Gameplay: loading process is halted when player loads saved data
 	// We can't start/join a new game until the session is destroyed, so wait for it to be idle again
+	app.DebugPrintf("EXIT_WORLD: waiting for session to become idle (inSession=%d)\n", (int)g_NetworkManager.IsInSession());
 	while( g_NetworkManager.IsInSession() )
 	{
 		Sleep(1);
 	}
+	app.DebugPrintf("EXIT_WORLD: session idle, returning to menu\n");
 
 	app.SetChangingSessionType(false);
 	app.SetReallyChangingSessionType(false);

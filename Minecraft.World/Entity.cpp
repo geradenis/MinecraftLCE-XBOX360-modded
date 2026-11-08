@@ -23,13 +23,18 @@
 #include "..\Minecraft.Client\MultiplayerLocalPlayer.h"
 
 
-int Entity::entityCounter = 2048;		// 4J - changed initialiser to 2048, as we are using range 0 - 2047 as special unique smaller ids for things that need network tracked
+int Entity::entityCounter = Entity::SMALL_ID_COUNT;		// 4J - changed initialiser to 2048, as we are using range 0 - 2047 as special unique smaller ids for things that need network tracked
+#ifndef _XBOX
+// The Xbox 360 compiler emits this in-class constant in stdafx.obj; an
+// additional strong definition here makes the client link fail with LNK2005.
+const int Entity::SMALL_ID_COUNT;
+#endif
 DWORD Entity::tlsIdx = TlsAlloc();
 
 // 4J - added getSmallId & freeSmallId methods
-unsigned int Entity::entityIdUsedFlags[2048/32] = {0};
-unsigned int Entity::entityIdWanderFlags[2048/32] = {0};
-unsigned int Entity::entityIdRemovingFlags[2048/32] = {0};
+unsigned int Entity::entityIdUsedFlags[Entity::SMALL_ID_COUNT/32] = {0};
+unsigned int Entity::entityIdWanderFlags[Entity::SMALL_ID_COUNT/32] = {0};
+unsigned int Entity::entityIdRemovingFlags[Entity::SMALL_ID_COUNT/32] = {0};
 int Entity::extraWanderIds[EXTRA_WANDER_MAX] = {0};
 int Entity::extraWanderTicks = 0;
 int Entity::extraWanderCount = 0;
@@ -61,7 +66,7 @@ int Entity::getSmallId()
 		}
 	}
 
-	for( int i = 0; i < (2048 / 32 ); i++ )
+	for( int i = 0; i < (SMALL_ID_COUNT / 32 ); i++ )
 	{
 		unsigned int uiFlags = *puiUsedFlags;
 		if( uiFlags != 0xffffffff )
@@ -101,7 +106,7 @@ void Entity::countFlagsForPIX()
 {
 	int freecount = 0;
 	unsigned int *puiUsedFlags = entityIdUsedFlags;
-	for( int i = 0; i < (2048 / 32 ); i++ )
+	for( int i = 0; i < (SMALL_ID_COUNT / 32 ); i++ )
 	{
 		unsigned int uiFlags = *puiUsedFlags;
 		if( uiFlags != 0xffffffff )
@@ -119,7 +124,7 @@ void Entity::countFlagsForPIX()
 		puiUsedFlags++;
 	}
 	PIXAddNamedCounter(freecount,"Small Ids free");
-	PIXAddNamedCounter(2048 - freecount,"Small Ids used");
+	PIXAddNamedCounter(SMALL_ID_COUNT - freecount,"Small Ids used");
 }
 
 void Entity::resetSmallId()
@@ -134,7 +139,7 @@ void Entity::resetSmallId()
 void Entity::freeSmallId(int index)
 {
 	if( ( (size_t)TlsGetValue(tlsIdx) ) == 0 ) return;		// Don't do anything with small ids if this isn't the server thread
-	if( index >= 2048 ) return;							// Don't do anything if this isn't a short id
+	if( index >= SMALL_ID_COUNT ) return;							// Don't do anything if this isn't a short id
 
 	unsigned int i = index / 32;
 	unsigned int j = index % 32;
@@ -157,7 +162,7 @@ void Entity::useSmallIds()
 void Entity::considerForExtraWandering(bool enable)
 {
 	if( ( (size_t)TlsGetValue(tlsIdx) ) == 0 ) return;		// Don't do anything with small ids if this isn't the server thread
-	if( entityId >= 2048 ) return;							// Don't do anything if this isn't a short id
+	if( entityId >= SMALL_ID_COUNT ) return;							// Don't do anything if this isn't a short id
 
 	unsigned int i = entityId / 32;
 	unsigned int j = entityId % 32;
@@ -177,7 +182,7 @@ void Entity::considerForExtraWandering(bool enable)
 bool Entity::isExtraWanderingEnabled()
 {
 	if( ( (size_t)TlsGetValue(tlsIdx) ) == 0 ) return false;		// Don't do anything with small ids if this isn't the server thread
-	if( entityId >= 2048 ) return false;						// Don't do anything if this isn't a short id
+	if( entityId >= SMALL_ID_COUNT ) return false;						// Don't do anything if this isn't a short id
 
 	for( int i = 0; i < extraWanderCount; i++ )
 	{
@@ -209,12 +214,12 @@ void Entity::tickExtraWandering()
 		int entityId = 0;
 		if( extraWanderCount )
 		{
-			entityId = ( extraWanderIds[ extraWanderCount - 1 ] + 1 ) % 2048;
+			entityId = ( extraWanderIds[ extraWanderCount - 1 ] + 1 ) % SMALL_ID_COUNT;
 		}
 
 		extraWanderCount = 0;
 
-		for( int k = 0; ( k < 2048 ) && ( extraWanderCount < EXTRA_WANDER_MAX); k++ )
+		for( int k = 0; ( k < SMALL_ID_COUNT ) && ( extraWanderCount < EXTRA_WANDER_MAX); k++ )
 		{
 			unsigned int i = entityId / 32;
 			unsigned int j = entityId % 32;
@@ -226,7 +231,7 @@ void Entity::tickExtraWandering()
 				//				printf("%d, ", entityId);
 			}
 
-			entityId = ( entityId + 1 ) % 2048;
+			entityId = ( entityId + 1 ) % SMALL_ID_COUNT;
 		}
 		//		printf("\n");
 	}
@@ -246,7 +251,7 @@ void Entity::_init(bool useSmallId)
 	else
 	{
 		entityId = Entity::entityCounter++;
-		if(entityCounter == 0x7ffffff ) entityCounter = 2048;
+		if(entityCounter == 0x7ffffff ) entityCounter = SMALL_ID_COUNT;
 	}
 
 	viewScale = 1.0;

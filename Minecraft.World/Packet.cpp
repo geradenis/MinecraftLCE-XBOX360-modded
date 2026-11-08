@@ -164,6 +164,11 @@ unordered_map<int, packetCreateFn> Packet::idToCreateMap;
 unordered_set<int> Packet::clientReceivedPackets = unordered_set<int>();
 unordered_set<int> Packet::serverReceivedPackets = unordered_set<int>();
 unordered_set<int> Packet::sendToAnyClientPackets = unordered_set<int>();
+#if defined(_XBOX)
+bool Packet::s_readError = false;
+#else
+thread_local bool Packet::s_readError = false;
+#endif
 
 // 4J Added
 unordered_map<int, Packet::PacketStatistics *> Packet::outgoingStatistics = unordered_map<int, Packet::PacketStatistics *>();
@@ -290,7 +295,12 @@ shared_ptr<Packet> Packet::getPacket(int id)
 	// 4J - removed try/catch
 	//    try
 	//	{
-	return idToCreateMap[id]();
+	// Use find(), not operator[]: getPacket is called concurrently by every
+	// connection read thread. operator[] is a non-const operation and can
+	// mutate the unordered_map, which corrupts it under concurrent reads.
+	AUTO_VAR(it, idToCreateMap.find(id));
+	if (it == idToCreateMap.end()) return nullptr;
+	return it->second();
 	//    } 
 	//	catch (exception e)
 	//	{
@@ -358,17 +368,28 @@ shared_ptr<Packet> Packet::readPacket(DataInputStream *dis, bool isServer) // th
 
 	if ((isServer && serverReceivedPackets.find(id) == serverReceivedPackets.end()) || (!isServer && clientReceivedPackets.find(id) == clientReceivedPackets.end()))
 	{
-		//app.DebugPrintf("Bad packet id %d\n", id);
-		__debugbreak();
-		assert(false);
-		//            throw new IOException(wstring(L"Bad packet id ") + _toString<int>(id));
+		// A malformed or partial packet must not crash the server. Treat it as
+		// end-of-stream so the connection is closed and the player is removed.
+		app.DebugPrintf("Packet::readPacket: bad packet id %d (isServer=%d)\n", id, (int)isServer);
+		return nullptr;
 	}
 
 	packet = getPacket(id);
-	if (packet == NULL) assert(false);//throw new IOException(wstring(L"Bad packet id ") + _toString<int>(id));
+	if (packet == NULL)
+	{
+		app.DebugPrintf("Packet::readPacket: unknown packet id %d (isServer=%d)\n", id, (int)isServer);
+		return nullptr;
+	}
 	
 	//app.DebugPrintf("%s reading packet %d\n", isServer ? "Server" : "Client", packet->getId());
+	s_readError = false;
 	packet->read(dis);
+	if (s_readError)
+	{
+		s_readError = false;
+		app.DebugPrintf("Packet::readPacket: packet stream desync in packet id %d (isServer=%d)\n", id, (int)isServer);
+		return nullptr;
+	}
 	//    }
 	//	catch (EOFException e) 
 	//	{
@@ -406,6 +427,90 @@ void Packet::writePacket(shared_ptr<Packet> packet, DataOutputStream *dos) // th
 	packet->write(dos);
 }
 
+shared_ptr<Packet> Packet::readTcpFrame(DataInputStream *dis, bool isServer)
+{
+	int magic = dis->readInt();
+	if (magic != TCP_FRAME_MAGIC)
+	{
+		// EOF (all bytes -1) and a partial magic followed by EOF are normal
+		// disconnect paths. Only log actual protocol mismatches.
+		if (magic != -1 && magic != 0x4CFFFFFF)
+		{
+			app.DebugPrintf("Packet::readTcpFrame: bad magic 0x%08X (expected 0x%08X)\n",
+				(unsigned int)magic, (unsigned int)TCP_FRAME_MAGIC);
+		}
+		return nullptr;
+	}
+
+	int version = dis->read();
+	if (version != TCP_FRAME_VERSION)
+	{
+		app.DebugPrintf("Packet::readTcpFrame: unsupported frame version %d (expected %d)\n",
+			version, TCP_FRAME_VERSION);
+		return nullptr;
+	}
+
+	int length = dis->readInt();
+	if (length <= 0 || length > TCP_FRAME_MAX_PAYLOAD)
+	{
+		app.DebugPrintf("Packet::readTcpFrame: bad payload length %d (max %d)\n",
+			length, TCP_FRAME_MAX_PAYLOAD);
+		return nullptr;
+	}
+
+	byteArray frame(length);
+	int got = dis->read(frame);
+	if (got != length)
+	{
+		app.DebugPrintf("Packet::readTcpFrame: short frame %d/%d\n", got, length);
+		return nullptr;
+	}
+
+	// The packet parser must consume exactly the frame payload. If it leaves
+	// bytes behind, the stream is out of sync; drop the connection instead of
+	// letting the next packet start in the middle of this one.
+	ByteArrayInputStream *bais = new ByteArrayInputStream(frame);
+	DataInputStream *frameDis = new DataInputStream(bais);
+	shared_ptr<Packet> packet = readPacket(frameDis, isServer);
+	if (packet == nullptr)
+	{
+		delete frameDis;
+		return nullptr;
+	}
+
+	int extra = frameDis->read();
+	if (extra != -1)
+	{
+		app.DebugPrintf("Packet::readTcpFrame: %d trailing bytes after packet id %d\n",
+			length, packet->getId());
+		delete frameDis;
+		return nullptr;
+	}
+
+	delete frameDis;
+	return packet;
+}
+
+void Packet::writeTcpFrame(shared_ptr<Packet> packet, DataOutputStream *dos,
+	DataOutputStream *payloadDos, ByteArrayOutputStream *payload)
+{
+	payload->reset();
+	writePacket(packet, payloadDos);
+
+	unsigned int length = payload->size();
+	if (length == 0 || length > (unsigned int)TCP_FRAME_MAX_PAYLOAD)
+	{
+		app.DebugPrintf("Packet::writeTcpFrame: bad payload length %u for packet id %d\n",
+			length, packet->getId());
+		return;
+	}
+
+	dos->writeInt(TCP_FRAME_MAGIC);
+	dos->writeByte((byte)TCP_FRAME_VERSION);
+	dos->writeInt((int)length);
+	dos->write(payload->buf, 0, length);
+}
+
 void Packet::writeUtf(const wstring& value, DataOutputStream *dos) // throws IOException TODO 4J JEV, should this declare a throws?
 {
 #if 0
@@ -425,15 +530,15 @@ wstring Packet::readUtf(DataInputStream *dis, int maxLength) // throws IOExcepti
 	short stringLength = dis->readShort();
 	if (stringLength > maxLength)
 	{
-		wstringstream stream;
-		stream << L"Received string length longer than maximum allowed (" << stringLength << " > " << maxLength << ")";
-		assert(false);
-		//        throw new IOException( stream.str() );
+		app.DebugPrintf("Packet::readUtf: string too long (%d > %d)\n", (int)stringLength, maxLength);
+		s_readError = true;
+		return L"";
 	}
 	if (stringLength < 0)
 	{
-		assert(false);
-		//        throw new IOException(L"Received string length is less than zero! Weird string!");
+		app.DebugPrintf("Packet::readUtf: negative string length %d (stream desync)\n", (int)stringLength);
+		s_readError = true;
+		return L"";
 	}
 
 	wstring builder = L"";

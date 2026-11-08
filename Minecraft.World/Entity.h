@@ -349,6 +349,13 @@ public:
 	// TU9
 	bool skipAttackInteraction(shared_ptr<Entity> source) {return false;}
 
+public:
+	// Number of compact network entity ids. The original code used 2048,
+	// which is too small for a 255-player session plus world entities. The
+	// ids are still written as signed shorts in the movement packets, so
+	// 16384 is a safe upper bound.
+	static const int SMALL_ID_COUNT = 16384;
+
 	// 4J - added to manage allocation of small ids
 private:
 	// Things also added here to be able to manage the concept of a number of extra "wandering" entities - normally path finding entities aren't allowed to
@@ -359,9 +366,9 @@ private:
 
 	int getSmallId();
 	void freeSmallId(int index);
-	static unsigned int entityIdUsedFlags[2048/32];
-	static unsigned int entityIdWanderFlags[2048/32];
-	static unsigned int entityIdRemovingFlags[2048/32];
+	static unsigned int entityIdUsedFlags[SMALL_ID_COUNT/32];
+	static unsigned int entityIdWanderFlags[SMALL_ID_COUNT/32];
+	static unsigned int entityIdRemovingFlags[SMALL_ID_COUNT/32];
 	static int extraWanderIds[EXTRA_WANDER_MAX];
 	static int extraWanderCount;
 	static int extraWanderTicks;

@@ -45,19 +45,46 @@ PlayerList::PlayerList(MinecraftServer *server)
 	overrideGameMode = NULL;
 	allowCheatsForAllPlayers = false;
 
-#ifdef __PSVITA__
+#ifdef _PSVITA__
 	viewDistance = 3;
 #elif defined _LARGE_WORLDS
 	// M2: keep this equal to LevelRenderer::PLAYER_VIEW_DISTANCE (12) so the
 	// server loads exactly the chunks the client wants to draw.
-	viewDistance = 12;
+	viewDistance = server->settings->getInt(L"view-distance", 12);
+	// PlayerChunkMap requires at least MIN_VIEW_DISTANCE (3).
+	if (viewDistance < PlayerChunkMap::MIN_VIEW_DISTANCE) viewDistance = PlayerChunkMap::MIN_VIEW_DISTANCE;
+	if (viewDistance > 12) viewDistance = 12;
 #else
 	viewDistance = 10;
 #endif
 
+#ifdef _WINDOWS64
+	// Number of chunks sent to a player per server tick. Java's
+	// PlayerChunkSender starts at 9 chunks/tick; the vanilla LCE path sends
+	// one, which makes a 12-chunk radius take ~31 seconds to stream.
+	chunksPerTick = server->settings->getInt(L"chunks-per-tick", 9);
+	if (chunksPerTick < 1) chunksPerTick = 1;
+	if (chunksPerTick > 16) chunksPerTick = 16;
+
+	// Java separates the chunk view distance from the simulation distance.
+	// Entities only tick within simulation-distance chunks of a player.
+	simulationDistance = server->settings->getInt(L"simulation-distance", viewDistance);
+	if (simulationDistance < 2) simulationDistance = 2;
+	if (simulationDistance > viewDistance) simulationDistance = viewDistance;
+#else
+	chunksPerTick = 1;
+	simulationDistance = viewDistance;
+#endif
+
     //int viewDistance = server->settings->getInt(L"view-distance", 10);
 
+#ifdef _WINDOWS64
+    maxPlayers = server->settings->getInt(L"max-players", MINECRAFT_NET_MAX_PLAYERS);
+    if (maxPlayers > MINECRAFT_NET_MAX_PLAYERS) maxPlayers = MINECRAFT_NET_MAX_PLAYERS;
+    if (maxPlayers < 1) maxPlayers = 1;
+#else
     maxPlayers = server->settings->getInt(L"max-players", 20);
+#endif
     doWhiteList = false;
 	
 	InitializeCriticalSection(&m_kickPlayersCS);
@@ -79,7 +106,9 @@ PlayerList::~PlayerList()
 
 void PlayerList::placeNewPlayer(Connection *connection, shared_ptr<ServerPlayer> player, shared_ptr<LoginPacket> packet)
 {
+	app.DebugPrintf("PlayerList::placeNewPlayer name=%ls\n", player->name.c_str());
 	bool newPlayer = load(player);
+	app.DebugPrintf("PlayerList::placeNewPlayer load done new=%d\n", (int)newPlayer);
         player->setLevel(server->getLevel(player->dimension));
 		player->gameMode->setLevel((ServerLevel *) player->level);
 
@@ -111,6 +140,15 @@ void PlayerList::placeNewPlayer(Connection *connection, shared_ptr<ServerPlayer>
         ServerLevel *level = server->getLevel(player->dimension);
 
 		DWORD playerIndex = 0;
+#ifdef _WINDOWS64
+		// TCP prototype: the server-assigned small id is also the player
+		// (colour) index. The client learns it from the LoginPacket.
+		if (networkPlayer != NULL)
+		{
+			playerIndex = networkPlayer->GetSmallId();
+			networkPlayer->SetOnlineName(player->name);
+		}
+#else
 		{
 			bool usedIndexes[MINECRAFT_NET_MAX_PLAYERS];
 			ZeroMemory( &usedIndexes, MINECRAFT_NET_MAX_PLAYERS * sizeof(bool) );
@@ -127,6 +165,7 @@ void PlayerList::placeNewPlayer(Connection *connection, shared_ptr<ServerPlayer>
 				}
 			}
 		}
+#endif
 		player->setPlayerIndex( playerIndex );
 		player->setCustomSkin( packet->m_playerSkinId );
 		player->setCustomCape( packet->m_playerCapeId );
@@ -307,7 +346,7 @@ void PlayerList::changeDimension(shared_ptr<ServerPlayer> player, ServerLevel *f
 
 int PlayerList::getMaxRange()
 {
-	return PlayerChunkMap::convertChunkRangeToBlock(getViewDistance());
+	return PlayerChunkMap::convertChunkRangeToBlock(getSimulationDistance());
 }
 
  // 4J Changed return val to bool to check if new player or loaded player
@@ -399,6 +438,10 @@ void PlayerList::add(shared_ptr<ServerPlayer> player)
 
     players.push_back(player);
 
+	// The new player must be visible to the same-system scan before
+	// level->addEntity() starts sending tracked entities.
+	updateSameSystemFlags();
+
 	// 4J Added
 	addPlayerToReceiving(player);
 
@@ -438,6 +481,8 @@ void PlayerList::add(shared_ptr<ServerPlayer> player)
 		}
 		player->connection->send(shared_ptr<ChatPacket>( new ChatPacket(firstSleepingPlayer->name, ChatPacket::e_ChatBedPlayerSleep)));
 	}
+
+	updateSameSystemFlags();
 }
 
 void PlayerList::move(shared_ptr<ServerPlayer> player)
@@ -447,6 +492,21 @@ void PlayerList::move(shared_ptr<ServerPlayer> player)
 
 void PlayerList::remove(shared_ptr<ServerPlayer> player)
 {
+#ifdef _WINDOWS64
+	// Remember the TCP small id; free it only after the player has been fully
+	// removed so lookups through the connection still resolve correctly.
+	unsigned char tcpSmallId = 0;
+	bool removeTcpPlayer = false;
+	if (player->connection != NULL)
+	{
+		INetworkPlayer *np = player->connection->getNetworkPlayer();
+		if (np != NULL && !np->IsHost())
+		{
+			tcpSmallId = np->GetSmallId();
+			removeTcpPlayer = true;
+		}
+	}
+#endif
     save(player);
 	//4J Stu - We don't want to save the map data for guests, so when we are sure that the player is gone delete the map
 	if(player->isGuest()) playerIo->deleteMapFilesForPlayer(player);
@@ -465,8 +525,32 @@ void PlayerList::remove(shared_ptr<ServerPlayer> player)
 	delete player->gameMode;		// Gamemode also needs deleted as it references back to this player
 	player->gameMode = NULL;
 
-	// 4J Stu - Save all the players currently in the game, which will also free up unused map id slots if required, and remove old players
-	saveAll(NULL,false);
+	// Do not save every player here. This method runs once per disconnect;
+	// with 50-255 players leaving together it queued O(players^2) saves and
+	// made the server look like it still had ghost players. The player's own
+	// data was saved above, autosave runs periodically, and stopServer()
+	// saves everyone.
+
+#ifdef _WINDOWS64
+	if (removeTcpPlayer)
+	{
+		g_NetworkManager.RemoveTcpPlayer(tcpSmallId);
+	}
+#endif
+
+	// On a TCP server no player has a same-system sibling, so the O(P^2)
+	// rescan is pure overhead for every disconnect. Only run it when at
+	// least one remaining player still has the flag set (splitscreen).
+	bool anySameSystem = player->m_hasSameSystemPlayers;
+	for (unsigned int i = 0; i < players.size() && !anySameSystem; ++i)
+	{
+		if (players[i]->m_hasSameSystemPlayers)
+		{
+			anySameSystem = true;
+			break;
+		}
+	}
+	if (anySameSystem) updateSameSystemFlags();
 }
 
 shared_ptr<ServerPlayer> PlayerList::getPlayerForLogin(PendingConnection *pendingConnection, const wstring& userName, PlayerUID xuid, PlayerUID onlineXuid)
@@ -511,7 +595,7 @@ shared_ptr<ServerPlayer> PlayerList::respawn(shared_ptr<ServerPlayer> serverPlay
 	{
 		INetworkPlayer *thisPlayer = serverPlayer->connection->getNetworkPlayer();
 
-		for( unsigned int i = 0; i < players.size(); i++ )
+		for( unsigned int i = 0; thisPlayer != NULL && i < players.size(); i++ )
 		{
 			shared_ptr<ServerPlayer> ep = players[i];
 			if( ep == serverPlayer ) continue;
@@ -720,7 +804,7 @@ void PlayerList::toggleDimension(shared_ptr<ServerPlayer> player, int targetDime
 	// Also consider if there is another player on this machine which is in the same dimension and can take over as primary player
 	INetworkPlayer *thisPlayer = player->connection->getNetworkPlayer();
 
-	for( unsigned int i = 0; i < players.size(); i++ )
+	for( unsigned int i = 0; thisPlayer != NULL && i < players.size(); i++ )
 	{
 		shared_ptr<ServerPlayer> ep = players[i];
 		if( ep == player ) continue;
@@ -1283,6 +1367,11 @@ int PlayerList::getViewDistance()
 	return viewDistance;
 }
 
+int PlayerList::getChunksPerTick()
+{
+	return chunksPerTick;
+}
+
 void PlayerList::setOverrideGameMode(GameType *gameMode)
 {
 	this->overrideGameMode = gameMode;
@@ -1360,6 +1449,7 @@ void PlayerList::removePlayerFromReceiving(shared_ptr<ServerPlayer> player, bool
 #endif
 		receiveAllPlayers[dimIndex].erase(it);
 		playerRemoved = true;
+		player->m_receivesAllPackets = false;
 	}
 
 	INetworkPlayer *thisPlayer = player->connection->getNetworkPlayer();
@@ -1381,6 +1471,7 @@ void PlayerList::removePlayerFromReceiving(shared_ptr<ServerPlayer> player, bool
 				app.DebugPrintf("Remove: Adding player %ls as primary in dimension %d\n", newPlayer->name.c_str(), dimIndex);
 #endif
 				receiveAllPlayers[dimIndex].push_back( newPlayer );
+				newPlayer->m_receivesAllPackets = true;
 				break;
 			}
 		}
@@ -1419,6 +1510,7 @@ void PlayerList::removePlayerFromReceiving(shared_ptr<ServerPlayer> player, bool
 					app.DebugPrintf("Remove: Adding player %ls as primary in dimension %d\n", newPlayer->name.c_str(), newPlayerDim);
 #endif
 					receiveAllPlayers[newPlayerDim].push_back( newPlayer );
+					newPlayer->m_receivesAllPackets = true;
 				}
 			}
 		}
@@ -1467,22 +1559,62 @@ void PlayerList::addPlayerToReceiving(shared_ptr<ServerPlayer> player)
 #endif
 		receiveAllPlayers[playerDim].push_back( player );
 	}
+	// Cache the result for the hot send path (O(1) afterwards).
+	player->m_receivesAllPackets =
+		find(receiveAllPlayers[playerDim].begin(), receiveAllPlayers[playerDim].end(), player) != receiveAllPlayers[playerDim].end();
+
+#ifdef _WINDOWS64
+	// TCP prototype diagnostics: whether this player is allowed to receive
+	// per-system packets (AddPlayerPacket and friends) on the host.
+	{
+		FILE *f = NULL;
+		fopen_s(&f, "H:\\Temp\\tcp_players.log", "a");
+		if (f)
+		{
+			fprintf(f, "addPlayerToReceiving: name=%ls netPlayer=%p shouldAdd=%d\n",
+				player->name.c_str(), (void *)thisPlayer, shouldAddPlayer ? 1 : 0);
+			fclose(f);
+		}
+	}
+#endif
 }
 
 bool PlayerList::canReceiveAllPackets(shared_ptr<ServerPlayer> player)
 {
-	int playerDim = 0;
-	if( player->dimension == -1 ) playerDim = 1;
-	else if( player->dimension == 1) playerDim = 2;
-	for(AUTO_VAR(it, receiveAllPlayers[playerDim].begin()); it != receiveAllPlayers[playerDim].end(); ++it)
+	// O(1): the flag is maintained by add/removePlayerFromReceiving. The old
+	// linear scan was O(players) on every PlayerConnection::send and became a
+	// serious bottleneck with hundreds of TCP players.
+	return player != NULL && player->m_receivesAllPackets;
+}
+
+void PlayerList::updateSameSystemFlags()
+{
+	// TrackedEntity::isVisible used to scan every player to find splitscreen
+	// siblings whenever an entity was out of range. With 150+ TCP players that
+	// made entity tracking O(players^2) per entity. Cache the answer on the
+	// player; TCP players are always their own system, so the scan is skipped
+	// entirely for them.
+	for (unsigned int i = 0; i < players.size(); ++i)
 	{
-		shared_ptr<ServerPlayer> newPlayer = *it;
-		if(newPlayer == player)
+		shared_ptr<ServerPlayer> p = players[i];
+		bool hasSameSystem = false;
+		INetworkPlayer *np = (p->connection != NULL) ? p->connection->getNetworkPlayer() : NULL;
+		if (np != NULL)
 		{
-			return true;
+			for (unsigned int j = 0; j < players.size(); ++j)
+			{
+				if (i == j) continue;
+				shared_ptr<ServerPlayer> q = players[j];
+				INetworkPlayer *nq = (q->connection != NULL) ? q->connection->getNetworkPlayer() : NULL;
+				if (nq != NULL && np->IsSameSystem(nq))
+				{
+					hasSameSystem = true;
+					break;
+				}
+			}
 		}
+		p->m_hasSameSystemPlayers = hasSameSystem;
 	}
-	return false;
 }
 
 void PlayerList::kickPlayerByShortId(BYTE networkSmallId)

@@ -34,6 +34,7 @@ private:
 	static unordered_map<Level *, deque<Toggle> *> recentToggles;		// 4J - brought forward change from 1.3.2
 public:
 	static void removeLevelReferences(Level *level);				// 4J added
+	static void clearAllLevelReferences();						// server shutdown
 private:
     bool isToggledTooFrequently(Level *level, int x, int y, int z, bool add);
 

@@ -42,12 +42,13 @@ bool ConsoleSaveFileOriginal::commitHeapPages( unsigned int pagesRequired )
 		app.DebugPrintf("ConsoleSaveFileOriginal: save needs %d pages, only %d reserved\n", pagesRequired, reservedPages);
 		return false;
 	}
-	void *pvRet = VirtualAlloc(pvHeap, pagesRequired * CSF_PAGE_SIZE, COMMIT_ALLOCATION, PAGE_READWRITE);
+	void *pvRet = VirtualAlloc(pvHeap, (SIZE_T)pagesRequired * CSF_PAGE_SIZE, COMMIT_ALLOCATION, PAGE_READWRITE);
 	if( pvRet == NULL )
 	{
 		// Out of physical memory - log it instead of trapping, a debug break here
 		// just hangs the game (and the emulator) while creating a world.
-		app.DebugPrintf("ConsoleSaveFileOriginal: failed to commit %d pages (%d KB)\n", pagesRequired, (pagesRequired * CSF_PAGE_SIZE) / 1024);
+		app.DebugPrintf("ConsoleSaveFileOriginal: failed to commit %d pages (%llu KB)\n",
+			pagesRequired, ((unsigned long long)pagesRequired * CSF_PAGE_SIZE) / 1024);
 		return false;
 	}
 	pagesCommitted = pagesRequired;
@@ -70,17 +71,32 @@ ConsoleSaveFileOriginal::ConsoleSaveFileOriginal(const wstring &fileName, LPVOID
 		// can't be used directly.
 		// M2: Reservations can fail (emulators, fragmented address space), so fall
 		// back to progressively smaller heaps instead of dying on a null pointer.
+#ifdef _WINDOWS64
+		// Try progressively smaller reservations if a huge one is rejected.
+		static const unsigned int reserveAttempts[] = {
+			MAX_PAGE_COUNT,		// 64 GB
+			512 * 1024,			// 32 GB
+			256 * 1024,			// 16 GB
+			64 * 1024,			// 4 GB
+			16 * 1024,			// 1 GB
+			4 * 1024,			// 256 MB
+			1024,				// 64 MB
+			256					// 16 MB
+		};
+#else
 		static const unsigned int reserveAttempts[] = { MAX_PAGE_COUNT, 1024, 256 };
+#endif
 		for( unsigned int i = 0; i < sizeof(reserveAttempts) / sizeof(reserveAttempts[0]) && pvHeap == NULL; ++i )
 		{
 			if( i > 0 && reserveAttempts[i] >= reserveAttempts[i - 1] ) continue;
-			pvHeap = VirtualAlloc(NULL, reserveAttempts[i] * CSF_PAGE_SIZE, RESERVE_ALLOCATION, PAGE_READWRITE );
+			pvHeap = VirtualAlloc(NULL, (SIZE_T)reserveAttempts[i] * CSF_PAGE_SIZE, RESERVE_ALLOCATION, PAGE_READWRITE );
 			if( pvHeap != NULL )
 			{
 				reservedPages = reserveAttempts[i];
 			}
 		}
-		app.DebugPrintf("ConsoleSaveFileOriginal: reserved %d pages (%d KB)\n", reservedPages, (reservedPages * CSF_PAGE_SIZE) / 1024);
+		app.DebugPrintf("ConsoleSaveFileOriginal: reserved %d pages (%llu KB)\n",
+			reservedPages, ((unsigned long long)reservedPages * CSF_PAGE_SIZE) / 1024);
 	}
 
 	pvSaveMem = pvHeap;
@@ -386,9 +402,9 @@ bool ConsoleSaveFileOriginal::PrepareForWrite( FileEntry *file, DWORD nNumberOfB
 
 BOOL ConsoleSaveFileOriginal::writeFile(FileEntry *file,LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten)
 {
-	assert( pvSaveMem != NULL );
 	if( pvSaveMem == NULL )
 	{
+		app.DebugPrintf("ConsoleSaveFileOriginal::writeFile: save memory unavailable\n");
 		if( lpNumberOfBytesWritten != NULL )
 			*lpNumberOfBytesWritten = 0;
 		return 0;
@@ -434,9 +450,9 @@ BOOL ConsoleSaveFileOriginal::writeFile(FileEntry *file,LPCVOID lpBuffer, DWORD 
 
 BOOL ConsoleSaveFileOriginal::zeroFile(FileEntry *file, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten)
 {
-	assert( pvSaveMem != NULL );
 	if( pvSaveMem == NULL )
 	{
+		app.DebugPrintf("ConsoleSaveFileOriginal::zeroFile: save memory unavailable\n");
 		if( lpNumberOfBytesWritten != NULL )
 			*lpNumberOfBytesWritten = 0;
 		return 0;
@@ -481,9 +497,9 @@ BOOL ConsoleSaveFileOriginal::zeroFile(FileEntry *file, DWORD nNumberOfBytesToWr
 BOOL ConsoleSaveFileOriginal::readFile( FileEntry *file, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead)
 {
 	DWORD actualBytesToRead;
-	assert( pvSaveMem != NULL );
 	if( pvSaveMem == NULL )
 	{
+		app.DebugPrintf("ConsoleSaveFileOriginal::readFile: save memory unavailable\n");
 		return 0;
 	}
 
@@ -492,7 +508,12 @@ BOOL ConsoleSaveFileOriginal::readFile( FileEntry *file, LPVOID lpBuffer, DWORD 
 	char *readStartOffset = (char *)pvSaveMem + file->currentFilePointer;
 	//printf("Read: pvSaveMem = %0xd, currentFilePointer = %d, readStartOffset = %0xd\n", pvSaveMem, file->currentFilePointer, readStartOffset);
 
-	assert( nNumberOfBytesToRead <= file->getFileSize() );
+	if( nNumberOfBytesToRead > file->getFileSize() )
+	{
+		app.DebugPrintf("ConsoleSaveFileOriginal::readFile: request %u > file size %u, clamping\n",
+			nNumberOfBytesToRead, file->getFileSize());
+		nNumberOfBytesToRead = file->getFileSize();
+	}
 
 	actualBytesToRead = nNumberOfBytesToRead;
 	if( file->currentFilePointer + nNumberOfBytesToRead > file->data.startOffset + file->data.length )

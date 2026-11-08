@@ -104,9 +104,10 @@ LevelType *LevelType::getLevelType(wstring name)
 	{	
 		for (int i = 0; i < 16; i++) 
 		{
+			if (levelTypes[i] == NULL) continue;
 			wstring genname=levelTypes[i]->m_generatorName;
 
-			if (levelTypes[i] != NULL && (genname.compare(name)==0)) 
+			if (genname.compare(name)==0) 
 			{
 				return levelTypes[i];
 			}

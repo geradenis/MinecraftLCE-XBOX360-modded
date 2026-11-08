@@ -40,6 +40,12 @@
 #include "..\..\Minecraft.World\OldChunkStorage.h"
 #include "..\Common\UI\UI.h"
 
+#ifdef _WINDOWS64
+#include "ServerConsole.h"
+#include "ServerCrashHandler.h"
+#include "ProtocolBot.h"
+#endif
+
 #include "Xbox/resource.h"
 
 HINSTANCE hMyInst;
@@ -741,6 +747,86 @@ static void EnableDpiAwareness()
 	}
 }
 
+#ifdef _WINDOWS64
+static DWORD WINAPI TcpSelfTestClient(LPVOID)
+{
+	FILE *f = NULL;
+	fopen_s(&f, "H:\\Temp\\tcp_test_client.txt", "w");
+	if (f) { fprintf(f, "start\n"); fflush(f); }
+	Socket *client = new Socket(L"127.0.0.1", 25566);
+	if (f) { fprintf(f, "after ctor ptr=%p ok=%d\n", client, client ? client->createdOk : -1); fflush(f); }
+	if (client == NULL || !client->createdOk)
+	{
+		if (f) { fprintf(f, "connect failed\n"); fclose(f); }
+		return 0;
+	}
+	InputStream *in = client->getInputStream(false);
+	OutputStream *out = client->getOutputStream(false);
+	byte ping[4] = { 'p', 'i', 'n', 'g' };
+	byteArray pingArr(ping, 4);
+	out->write(pingArr, 0, 4);
+	if (f) { fprintf(f, "after write\n"); fflush(f); }
+	byte pong[4] = { 0, 0, 0, 0 };
+	byteArray pongArr(pong, 4);
+	int n = in->read(pongArr, 0, 4);
+	if (f) { fprintf(f, "read=%d data=%c%c%c%c\n", n, pong[0], pong[1], pong[2], pong[3]); fflush(f); fclose(f); }
+	client->close(false);
+	delete client;
+	return 0;
+}
+
+static void RunTcpSelfTest()
+{
+	FILE *f = NULL;
+	fopen_s(&f, "H:\\Temp\\tcp_test_server.txt", "w");
+	if (f) { fprintf(f, "start\n"); fflush(f); }
+	WSADATA wsa;
+	int wsaRet = WSAStartup(MAKEWORD(2, 2), &wsa);
+	if (f) { fprintf(f, "wsa=%d\n", wsaRet); fflush(f); }
+	SOCKET ls = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (f) { fprintf(f, "ls=%llu\n", (unsigned long long)ls); fflush(f); }
+	sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	addr.sin_port = htons(25566);
+	int br = ::bind(ls, (sockaddr *)&addr, sizeof(addr));
+	if (f) { fprintf(f, "bind=%d\n", br); fflush(f); }
+	int lr = listen(ls, 1);
+	if (f) { fprintf(f, "listen=%d\n", lr); fflush(f); }
+	CreateThread(NULL, 0, TcpSelfTestClient, NULL, 0, NULL);
+	if (f) { fprintf(f, "before accept\n"); fflush(f); }
+	SOCKET s = accept(ls, NULL, NULL);
+	if (f) { fprintf(f, "accepted=%llu\n", (unsigned long long)s); fflush(f); }
+	Socket *server = new Socket(s, true);
+	if (f) { fprintf(f, "server ctor ok=%d\n", server ? server->createdOk : -1); fflush(f); }
+	InputStream *in = server->getInputStream(true);
+	OutputStream *out = server->getOutputStream(true);
+	byte buf[4];
+	byteArray arr(buf, 4);
+	int n = in->read(arr, 0, 4);
+	if (f) { fprintf(f, "read=%d data=%c%c%c%c\n", n, buf[0], buf[1], buf[2], buf[3]); fflush(f); }
+	byte pong[4] = { 'p', 'o', 'n', 'g' };
+	byteArray pongArr(pong, 4);
+	out->write(pongArr, 0, 4);
+	server->close(true);
+	delete server;
+	closesocket(ls);
+	if (f) fclose(f);
+	Sleep(1000);
+}
+#endif
+
+#ifdef _WINDOWS64
+wstring g_connectIp;
+int g_connectPort = 25565;
+wstring g_playerName;	// --name / --nick (PC clients and hosts)
+bool g_dedicatedServer = false;
+bool g_autoJoin = false;
+bool g_headless = false;
+bool g_flatWorld = false;
+#endif
+
 int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 					   _In_opt_ HINSTANCE hPrevInstance,
 					   _In_ LPTSTR    lpCmdLine,
@@ -748,6 +834,138 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 {
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
+
+#ifdef _WINDOWS64
+	if (lpCmdLine != NULL && _tcsstr(lpCmdLine, _T("--tcp-test")) != NULL)
+	{
+		RunTcpSelfTest();
+		return 0;
+	}
+
+	if (lpCmdLine != NULL)
+	{
+		if (_tcsstr(lpCmdLine, _T("--server")) != NULL)
+		{
+			g_dedicatedServer = true;
+		}
+		if (_tcsstr(lpCmdLine, _T("--headless")) != NULL)
+		{
+			g_headless = true;
+		}
+		if (_tcsstr(lpCmdLine, _T("--flat")) != NULL)
+		{
+			g_flatWorld = true;
+		}
+
+		bool noSound = false;
+		if (_tcsstr(lpCmdLine, _T("--nosound")) != NULL) noSound = true;
+		if (_tcsstr(lpCmdLine, _T("--sound")) != NULL) noSound = false;
+		// Dedicated servers have no use for audio and may run on machines
+		// without a sound device; default them to silent.
+		if (g_dedicatedServer && _tcsstr(lpCmdLine, _T("--sound")) == NULL) noSound = true;
+		SoundEngine::SetDisabled(noSound);
+
+		const TCHAR *p = _tcsstr(lpCmdLine, _T("--connect"));
+		if (p == NULL) p = _tcsstr(lpCmdLine, _T("--join"));
+		if (p != NULL)
+		{
+			p += (_tcsncmp(p, _T("--connect"), 9) == 0) ? 9 : 6;
+			while (*p == _T(' ') || *p == _T('=')) ++p;
+			TCHAR buf[128];
+			int i = 0;
+			while (*p != 0 && *p != _T(' ') && i < 127) buf[i++] = *p++;
+			buf[i] = 0;
+			wstring addr = convStringToWstring(buf);
+			size_t colon = addr.find(L':');
+			if (colon != wstring::npos)
+			{
+				g_connectPort = _wtoi(addr.substr(colon + 1).c_str());
+				addr = addr.substr(0, colon);
+			}
+			if (!addr.empty())
+			{
+				g_connectIp = addr;
+				g_autoJoin = true;
+			}
+		}
+
+		// Optional PC nickname. On Xbox the name comes from the profile
+		// gamertag; this override is for the Windows64 TCP client/host.
+		const TCHAR *nameArg = _tcsstr(lpCmdLine, _T("--name"));
+		if (nameArg == NULL) nameArg = _tcsstr(lpCmdLine, _T("--nick"));
+		if (nameArg != NULL)
+		{
+			nameArg += 6; // skip "--name" / "--nick"
+			while (*nameArg == _T(' ') || *nameArg == _T('=')) ++nameArg;
+			TCHAR nbuf[64];
+			int ni = 0;
+			if (*nameArg == _T('"'))
+			{
+				++nameArg;
+				while (*nameArg != 0 && *nameArg != _T('"') && ni < 63) nbuf[ni++] = *nameArg++;
+			}
+			else
+			{
+				while (*nameArg != 0 && *nameArg != _T(' ') && ni < 63) nbuf[ni++] = *nameArg++;
+			}
+			nbuf[ni] = 0;
+			if (nbuf[0] != 0)
+			{
+				g_playerName = convStringToWstring(nbuf);
+				// Player::MAX_NAME_LENGTH is 20; longer names make
+				// LoginPacket::read reject the stream.
+				if (g_playerName.length() > 20) g_playerName = g_playerName.substr(0, 20);
+			}
+		}
+	}
+#endif
+
+#ifdef _WINDOWS64
+	// Protocol bot mode: N lightweight TCP clients in one process. Used for
+	// stress tests; no window, no D3D, no world is created.
+	if (lpCmdLine != NULL)
+	{
+		const TCHAR *botsArg = _tcsstr(lpCmdLine, _T("--bots"));
+		if (botsArg != NULL)
+		{
+			botsArg += 6;
+			while (*botsArg == _T(' ') || *botsArg == _T('=')) ++botsArg;
+			int botCount = _ttoi(botsArg);
+			if (botCount <= 0) botCount = 1;
+
+			wstring prefix = L"Bot";
+			const TCHAR *prefixArg = _tcsstr(lpCmdLine, _T("--bot-prefix"));
+			if (prefixArg != NULL)
+			{
+				prefixArg += 12;
+				while (*prefixArg == _T(' ') || *prefixArg == _T('=')) ++prefixArg;
+				TCHAR pbuf[64];
+				int pi = 0;
+				while (*prefixArg != 0 && *prefixArg != _T(' ') && pi < 63) pbuf[pi++] = *prefixArg++;
+				pbuf[pi] = 0;
+				if (pbuf[0] != 0) prefix = convStringToWstring(pbuf);
+			}
+
+			ServerCrashHandler::Install("bots");
+			RunProtocolBots(botCount, prefix,
+				g_connectIp.empty() ? wstring(L"127.0.0.1") : g_connectIp,
+				g_connectPort);
+			return 0;
+		}
+	}
+#endif
+
+#ifdef _WINDOWS64
+	ServerCrashHandler::Install(g_dedicatedServer ? "server" : "client");
+	if (_tcsstr(lpCmdLine, _T("--crash-test")) != NULL)
+	{
+		// Diagnostics test hook: deliberately fault so the crash handler
+		// writes a dump and a symbolized stack.
+		volatile int *crash = NULL;
+		*crash = 1;
+	}
+	if (g_dedicatedServer && _tcsstr(lpCmdLine, _T("--noconsole")) == NULL) ServerConsole::Init();
+#endif
 
 	EnableDpiAwareness();
 
@@ -773,6 +991,18 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 			//g_iScreenWidth = 960;
 			//g_iScreenHeight = 544;
 		}
+		else if(lpCmdLine[0] == '4')
+		{
+			// Stress-test resolution: keep many client windows cheap.
+			g_iScreenWidth = 320;
+			g_iScreenHeight = 240;
+		}
+		else if(lpCmdLine[0] == '5')
+		{
+			// Minimal stress-test resolution.
+			g_iScreenWidth = 160;
+			g_iScreenHeight = 120;
+		}
 	}
 
 
@@ -792,6 +1022,13 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 		CleanupDevice();
 		return 0;
 	}
+
+#ifdef _WINDOWS64
+	if (g_headless && g_hWnd != NULL)
+	{
+		ShowWindow(g_hWnd, SW_HIDE);
+	}
+#endif
 
 #if 0
 	// Main message loop
@@ -1042,6 +1279,10 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 		if( autoStart && autoStart[0] == '1' )
 			autoStartPending = true;
 	}
+#ifdef _WINDOWS64
+	bool serverStartPending = g_dedicatedServer;
+	bool autoJoinPending = g_autoJoin;
+#endif
 
 	//Sleep(10000);
 #if 0
@@ -1095,25 +1336,104 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 
 		app.UpdateTime();
 
-		// M2: deferred automatic world start for tests (MC_AUTOSTART_WORLD=1).
+#ifdef _WINDOWS64
+		if (ServerConsole::StopRequested())
+		{
+			// Do not terminate the process while the server thread is still
+			// saving and deleting levels. Wait for ServerStopped() first.
+			if (g_NetworkManager.ServerStoppedValid())
+			{
+				g_NetworkManager.ServerStoppedWait();
+			}
+			PostQuitMessage(0);
+		}
+#endif
+
+		// M2: deferred automatic world start for tests (MC_AUTOSTART_WORLD=1),
+		// --server (dedicated host) and --join ip:port (auto-connect client).
 		// Wait until the main menu is actually on screen, otherwise the intro
 		// scene replaces the loading scene and the session never starts.
+#ifdef _WINDOWS64
+		if( autoStartPending || serverStartPending || autoJoinPending )
+#else
 		if( autoStartPending )
+#endif
 		{
 			UIScene *topScene = ui.GetTopScene( 0 );
+#ifdef _WINDOWS64
+			// Auto modes must not wait for a player to dismiss the intro/save
+			// message scenes.
+			if( topScene != NULL &&
+				dynamic_cast<UIScene_MainMenu *>( topScene ) == NULL &&
+				( dynamic_cast<UIScene_Intro *>( topScene ) != NULL ||
+				  dynamic_cast<UIScene_SaveMessage *>( topScene ) != NULL ) )
+			{
+				ui.NavigateToScene( 0, eUIScene_MainMenu );
+			}
+			else
+#endif
 			if( topScene != NULL && dynamic_cast<UIScene_MainMenu *>( topScene ) != NULL )
 			{
-				autoStartPending = false;
-				app.DebugPrintf( "MC_AUTOSTART_WORLD: creating test world\n" );
-				// The profile save message is left on the scene stack when the
-				// menus are skipped and would cover the game until OK is pressed.
-				// Close it exactly like the OK button does.
-				ui.NavigateToHomeMenu();
-				app.TemporaryCreateGameStart();
+#ifdef _WINDOWS64
+				if( serverStartPending )
+				{
+					serverStartPending = false;
+					app.DebugPrintf( "--server: creating/hosting world\n" );
+					ui.NavigateToHomeMenu();
+					app.TemporaryCreateGameStart();
+				}
+				else if( autoJoinPending )
+				{
+					autoJoinPending = false;
+					ui.NavigateToHomeMenu();
+					ProfileManager.SetLockedProfile(0);
+					app.DebugPrintf( "--join: connecting to %ls:%d\n", g_connectIp.c_str(), g_connectPort );
+					CGameNetworkManager::eJoinGameResult result = g_NetworkManager.JoinGame(NULL, 1);
+					if( result == CGameNetworkManager::JOINGAME_SUCCESS )
+					{
+						LoadingInputParams *loadingParams = new LoadingInputParams();
+						loadingParams->func = &CGameNetworkManager::RunNetworkGameThreadProc;
+						loadingParams->lpParam = NULL;
+
+						app.SetAutosaveTimerTime();
+
+						UIFullscreenProgressCompletionData *completionData = new UIFullscreenProgressCompletionData();
+						completionData->bShowBackground = TRUE;
+						completionData->bShowLogo = TRUE;
+						completionData->type = e_ProgressCompletion_CloseAllPlayersUIScenes;
+						completionData->iPad = ProfileManager.GetPrimaryPad();
+						loadingParams->completionData = completionData;
+
+						ui.NavigateToScene(ProfileManager.GetPrimaryPad(), eUIScene_FullscreenProgress, loadingParams);
+					}
+					else
+					{
+						app.DebugPrintf( "--join: failed (%d)\n", (int)result );
+					}
+				}
+				else
+#endif
+				{
+					autoStartPending = false;
+					app.DebugPrintf( "MC_AUTOSTART_WORLD: creating test world\n" );
+					// The profile save message is left on the scene stack when the
+					// menus are skipped and would cover the game until OK is pressed.
+					// Close it exactly like the OK button does.
+					ui.NavigateToHomeMenu();
+					app.TemporaryCreateGameStart();
+				}
 			}
 		}
 		PIXBeginNamedEvent(0,"Input manager tick");
-		InputManager.Tick();
+		// A dedicated server must not read the gamepad/keyboard of the
+		// interactive client. Both processes share the same physical device
+		// when hosted on one PC; polling it here made the server react to
+		// controller input as well. Console commands use ServerConsole's own
+		// input thread, so they are unaffected.
+		if (!g_dedicatedServer)
+		{
+			InputManager.Tick();
+		}
 		PIXEndNamedEvent();
 		PIXBeginNamedEvent(0,"Profile manager tick");
 		//		ProfileManager.Tick();
@@ -1145,8 +1465,13 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 		// Render game graphics.
 		if(app.GetGameStarted())
 		{
-			pMinecraft->run_middle();
-			app.SetAppPaused( g_NetworkManager.IsLocalGame() && g_NetworkManager.GetPlayerCount() == 1 && ui.IsPauseMenuDisplayed(ProfileManager.GetPrimaryPad()) );
+#ifdef _WINDOWS64
+			if (!g_dedicatedServer)
+#endif
+			{
+				pMinecraft->run_middle();
+				app.SetAppPaused( g_NetworkManager.IsLocalGame() && g_NetworkManager.GetPlayerCount() == 1 && ui.IsPauseMenuDisplayed(ProfileManager.GetPrimaryPad()) );
+			}
 		}
 		else
 		{

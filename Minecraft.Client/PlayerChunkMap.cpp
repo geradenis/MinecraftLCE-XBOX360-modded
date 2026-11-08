@@ -56,8 +56,9 @@ void PlayerChunkMap::PlayerChunk::add(shared_ptr<ServerPlayer> player, bool send
     if (find(players.begin(),players.end(),player) != players.end())
 	{
 		// 4J-PB - At the start of the game, lots of chunks are added, and we can then move into an area that is outside the diameter of our starting area, 
-		// but is inside the area loaded at the start.
-		app.DebugPrintf("--- Adding player to chunk x=%d\t z=%d, but they are already in there!\n",pos.x, pos.z);
+		// but is inside the area loaded at the start. This is expected; logging
+		// it per chunk and per player flooded the console during 255-player
+		// logins and made a single server tick take minutes.
 		return;
 
 		//assert(false);
@@ -86,8 +87,8 @@ void PlayerChunkMap::PlayerChunk::remove(shared_ptr<ServerPlayer> player)
 	AUTO_VAR(it, find(players.begin(),players.end(),player));
 	if ( it == players.end())
 	{
-		app.DebugPrintf("--- INFO - Removing player from chunk x=%d\t z=%d, but they are not in that chunk!\n",pos.x, pos.z);
-
+		// Also expected during dimension changes and logout; do not log per
+		// chunk (it becomes thousands of lines with hundreds of players).
 		return;
 	}
 
@@ -376,7 +377,7 @@ void PlayerChunkMap::PlayerChunk::broadcast(shared_ptr<TileEntity> te)
 PlayerChunkMap::PlayerChunkMap(ServerLevel *level, int dimension, int radius)
 {
 	assert(radius <= MAX_VIEW_DISTANCE);
-	assert(radius >= MIN_VIEW_DISTANCE);
+	assert(radius >= 1);
     this->radius = radius;
     this->level = level;
 	this->dimension = dimension;
@@ -793,7 +794,7 @@ void PlayerChunkMap::setRadius(int newRadius)
 		}
 
 		assert(radius <= MAX_VIEW_DISTANCE);
-		assert(radius >= MIN_VIEW_DISTANCE);
+		assert(radius >= 1);
 		this->radius = newRadius;
 	}
 }

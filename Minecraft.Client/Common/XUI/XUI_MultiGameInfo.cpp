@@ -262,6 +262,11 @@ void CScene_MultiGameInfo::JoinGame(CScene_MultiGameInfo* pClass)
 	bool noPrivileges = false;
 	DWORD dwSignedInUsers = 0;
 
+	// The direct TCP client must have a locked profile so that
+	// CGameNetworkManager::StartNetworkGame can find the local player it
+	// created in CPlatformNetworkManagerStub::JoinGame.
+	ProfileManager.SetLockedProfile(0);
+
 	// if we're in SD mode, then only the primary player gets to play
 	if(RenderManager.IsHiDef())
 	{
@@ -291,6 +296,16 @@ void CScene_MultiGameInfo::JoinGame(CScene_MultiGameInfo* pClass)
 	BOOL pccFriendsAllowed = TRUE;
 	ProfileManager.AllowedPlayerCreatedContent(ProfileManager.GetPrimaryPad(),false,&pccAllowed,&pccFriendsAllowed);
 	if(!pccAllowed && !pccFriendsAllowed) noUGC = true;
+
+#ifdef _XBOX
+	// Direct TCP client PoC: the dedicated TCP server is not an Xbox Live
+	// session, so Xbox Live multiplayer/UGC privileges do not apply.
+	if (pClass->m_selectedSession != NULL)
+	{
+		noUGC = false;
+		noPrivileges = false;
+	}
+#endif
 
 	if(noUGC)
 	{
@@ -343,6 +358,25 @@ void CScene_MultiGameInfo::JoinGame(CScene_MultiGameInfo* pClass)
 
 				app.NavigateToHomeMenu();
 			}
+		}
+		else
+		{
+			// Direct TCP client: the normal Xbox QNet JoinGame starts the
+			// session internally, but the TCP stub only creates the socket.
+			// Launch the network game thread here so the client sends its
+			// PreLogin/Login packets and loads the world.
+			LoadingInputParams *loadingParams = new LoadingInputParams();
+			loadingParams->func = &CGameNetworkManager::RunNetworkGameThreadProc;
+			loadingParams->lpParam = NULL;
+
+			UIFullscreenProgressCompletionData *completionData = new UIFullscreenProgressCompletionData();
+			completionData->bShowBackground = TRUE;
+			completionData->bShowLogo = TRUE;
+			completionData->type = e_ProgressCompletion_CloseAllPlayersUIScenes;
+			completionData->iPad = DEFAULT_XUI_MENU_USER;
+			loadingParams->completionData = completionData;
+
+			app.NavigateToScene(ProfileManager.GetPrimaryPad(), eUIScene_FullscreenProgress, loadingParams);
 		}
 	}
 }

@@ -10,6 +10,8 @@
 #include "..\..\DLCTexturePack.h"
 #include "Common\DLC\DLCAudioFile.h"
 
+bool SoundEngine::s_disableSound = false;
+
 #ifdef __PSVITA__
 #include <audioout.h>
 #endif
@@ -203,6 +205,7 @@ void AILCALL MilesMixerCB(HDIGDRIVER dig)
 /////////////////////////////////////////////
 void SoundEngine::init(Options *pOptions)
 {
+	if (s_disableSound) return;
 	app.DebugPrintf("---SoundEngine::init\n");
 #ifdef __DISABLE_MILES__
 	return;
@@ -383,6 +386,7 @@ void SoundEngine::init(Options *pOptions)
 
 void SoundEngine::SetStreamingSounds(int iOverworldMin, int iOverWorldMax, int iNetherMin, int iNetherMax, int iEndMin, int iEndMax, int iCD1)
 {
+	if (s_disableSound) return;
 	m_iStream_Overworld_Min=iOverworldMin;
 	m_iStream_Overworld_Max=iOverWorldMax;
 	m_iStream_Nether_Min=iNetherMin;
@@ -403,6 +407,7 @@ void SoundEngine::SetStreamingSounds(int iOverworldMin, int iOverWorldMax, int i
 // AP - moved to a separate function so it can be called from the mixer callback on Vita
 void SoundEngine::updateMiles()
 {
+	if (s_disableSound) return;
 #ifdef __PSVITA__ 
 	//CD - We must check for Background Music [BGM] at any point
 	//If it's playing disable our audio, otherwise enable
@@ -627,6 +632,7 @@ void SoundEngine::tick(shared_ptr<Mob> *players, float a)
 #ifdef __DISABLE_MILES__
 	return;
 #endif
+	if (s_disableSound) return;
 
 #ifdef __PSVITA__
 	EnterCriticalSection(&SoundEngine_MixerMutex);
@@ -704,6 +710,8 @@ void SoundEngine::tick(shared_ptr<Mob> *players, float a)
 SoundEngine::SoundEngine()
 {
 	random = new Random();
+	m_hBank = NULL;
+	m_hDriver = 0;
 	m_hStream=0;
 	m_StreamState=eMusicStreamState_Idle;
 	m_iMusicDelay=0;
@@ -753,6 +761,7 @@ void SoundEngine::GetSoundName(char *szSoundName,int iSound)
 /////////////////////////////////////////////
 void SoundEngine::play(int iSound, float x, float y, float z, float volume, float pitch)
 {
+	if (s_disableSound) return;
 	U8 szSoundName[256];
 
 	if(iSound==-1)
@@ -812,6 +821,7 @@ void SoundEngine::play(int iSound, float x, float y, float z, float volume, floa
 /////////////////////////////////////////////
 void SoundEngine::playUI(int iSound, float volume, float pitch) 
 {
+	if (s_disableSound) return;
 	U8 szSoundName[256];
 	wstring name;
 	// we have some game sounds played as UI sounds...
@@ -874,6 +884,7 @@ void SoundEngine::playUI(int iSound, float volume, float pitch)
 /////////////////////////////////////////////
 void SoundEngine::playStreaming(const wstring& name, float x, float y , float z, float volume, float pitch, bool bMusicDelay)
 {
+	if (s_disableSound) return;
 	// This function doesn't actually play a streaming sound, just sets states and an id for the music tick to play it
 	// Level audio will be played when a play with an empty name comes in
 	// CD audio will be played when a named stream comes in
@@ -1002,6 +1013,7 @@ int SoundEngine::GetRandomishTrack(int iStart,int iEnd)
 /////////////////////////////////////////////
 int SoundEngine::getMusicID(int iDomain)
 {
+	if (s_disableSound) return 0;
 	int iRandomVal=0;
 	Minecraft *pMinecraft=Minecraft::GetInstance();
 
@@ -1052,6 +1064,7 @@ int SoundEngine::getMusicID(int iDomain)
 // check what the CD is
 int SoundEngine::getMusicID(const wstring& name)
 {
+	if (s_disableSound) return 0;
 	int iCD=0;
 	char *SoundName = (char *)ConvertSoundPathToName(name,true);
 
@@ -1093,6 +1106,7 @@ float SoundEngine::getMasterMusicVolume()
 /////////////////////////////////////////////
 void SoundEngine::updateMusicVolume(float fVal)
 {
+	if (s_disableSound) return;
 	m_MasterMusicVolume=fVal;
 }
 
@@ -1103,6 +1117,7 @@ void SoundEngine::updateMusicVolume(float fVal)
 /////////////////////////////////////////////
 void SoundEngine::updateSystemMusicPlaying(bool isPlaying)
 {
+	if (s_disableSound) return;
 	m_bSystemMusicPlaying = isPlaying;
 }
 
@@ -1113,6 +1128,7 @@ void SoundEngine::updateSystemMusicPlaying(bool isPlaying)
 /////////////////////////////////////////////
 void SoundEngine::updateSoundEffectVolume(float fVal) 
 {
+	if (s_disableSound) return;
 	m_MasterEffectsVolume=fVal;
 	//AIL_set_variable_float(0,"UserEffectVol",fVal);
 }
@@ -1139,6 +1155,7 @@ int SoundEngine::OpenStreamThreadProc( void* lpParameter )
 /////////////////////////////////////////////
 void SoundEngine::playMusicTick() 
 {
+	if (s_disableSound) return;
 // AP - vita will update the music during the mixer callback
 #ifndef __PSVITA__
 	playMusicUpdate();
@@ -1148,6 +1165,7 @@ void SoundEngine::playMusicTick()
 // AP - moved to a separate function so it can be called from the mixer callback on Vita
 void SoundEngine::playMusicUpdate() 
 {
+	if (s_disableSound) return;
 	//return;
 	static bool firstCall = true;
 	static float fMusicVol = 0.0f;

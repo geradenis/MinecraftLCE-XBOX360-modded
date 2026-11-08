@@ -338,7 +338,8 @@ bool DLCManager::readDLCDataFile(DWORD &dwFilesProcessed, const string &path, DL
 		DWORD error = GetLastError();
 		app.DebugPrintf("Failed to open DLC data file with error code %d (%x)\n", error, error);
 		if( dwFilesProcessed == 0 ) removePack(pack);
-		assert(false);
+		// Dedicated servers may not have optional DLC content installed.
+		// A missing DLC data file is not fatal: log it and skip the pack.
 		return false;
 	}
 

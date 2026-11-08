@@ -163,6 +163,15 @@ void ClientConnection::handleLogin(shared_ptr<LoginPacket> packet)
 		pMojangData=app.GetMojangDataForXuid(OnlineXuid);
 	}
 
+#ifdef _XBOX
+	// Direct TCP client PoC: there is no Xbox Live host, and TMS skin/cape
+	// reads can block forever on an offline profile. Skip them for TCP.
+	if (g_NetworkManager.GetHostPlayer() == NULL)
+	{
+		pMojangData = NULL;
+	}
+#endif
+
 	if(!g_NetworkManager.IsHost() )
 	{
 		Minecraft::GetInstance()->progressRenderer->progressStagePercentage((eCCLoginReceived * 100)/ (eCCConnected));
@@ -248,8 +257,16 @@ void ClientConnection::handleLogin(shared_ptr<LoginPacket> packet)
 			}
 		}
 
-		// If we're online, read the banned game list
+		// If we're online, read the banned game list. A direct TCP client has
+		// no Xbox Live host, and this call can block on an offline profile.
+#ifdef _XBOX
+		if (g_NetworkManager.GetHostPlayer() != NULL)
+		{
+			app.ReadBannedList(iUserID);
+		}
+#else
 		app.ReadBannedList(iUserID);
+#endif
 		// mark the level as not checked against banned levels - it'll be checked once the level starts
 		app.SetBanListCheck(iUserID,false);
 	}
@@ -305,6 +322,18 @@ void ClientConnection::handleLogin(shared_ptr<LoginPacket> packet)
 		//minecraft->setScreen(new ReceivingLevelScreen(this));
 		minecraft->player->entityId = packet->clientVersion;
 
+#ifdef _WINDOWS64
+		// The server assigns the real small id; adopt it before any player
+		// info lookups so multi-client sessions stay consistent.
+		{
+			INetworkPlayer *localNetPlayer = g_NetworkManager.GetLocalPlayerByUserIndex(m_userIndex);
+			if (localNetPlayer != NULL)
+			{
+				localNetPlayer->SetSmallId(packet->m_playerIndex);
+				getSocket()->setPlayer(localNetPlayer);
+			}
+		}
+#endif
 		BYTE networkSmallId = getSocket()->getSmallId();
 		app.UpdatePlayerInfo(networkSmallId, packet->m_playerIndex, packet->m_uiGamePrivileges);
 		minecraft->player->setPlayerGamePrivilege(Player::ePlayerGamePrivilege_All, packet->m_uiGamePrivileges);
@@ -720,9 +749,31 @@ void ClientConnection::handleSetEntityData(shared_ptr<SetEntityDataPacket> packe
 
 void ClientConnection::handleAddPlayer(shared_ptr<AddPlayerPacket> packet)
 {
-	// Some remote players could actually be local players that are already added
-	for(unsigned int idx = 0; idx < XUSER_MAX_COUNT; ++idx)
+#ifdef _WINDOWS64
+	// TCP prototype diagnostics: did the host entity packet arrive at all?
 	{
+		FILE *f = NULL;
+		fopen_s(&f, "H:\\Temp\\tcp_players.log", "a");
+		if (f)
+		{
+			fprintf(f, "handleAddPlayer: name=%ls xuid=%llu id=%d pos=%.1f,%.1f,%.1f\n",
+				packet->name.c_str(), (unsigned long long)packet->xuid, packet->id,
+				packet->x / 32.0, packet->y / 32.0, packet->z / 32.0);
+			fclose(f);
+		}
+	}
+#endif
+
+#ifdef _WINDOWS64
+	// TCP prototype: all clients share the same local profile/XUID, so the
+	// XUID check would classify the host as the local player and never spawn
+	// its entity. Skip the check on Windows64.
+#else
+	// Some remote players could actually be local players that are already added
+	if (packet->xuid != 0)
+	{
+		for(unsigned int idx = 0; idx < XUSER_MAX_COUNT; ++idx)
+		{
 		// need to use the XUID here		
  		PlayerUID playerXUIDOnline = INVALID_XUID, playerXUIDOffline = INVALID_XUID;
  		ProfileManager.GetXUID(idx,&playerXUIDOnline,true);
@@ -733,7 +784,9 @@ void ClientConnection::handleAddPlayer(shared_ptr<AddPlayerPacket> packet)
 			app.DebugPrintf("AddPlayerPacket received with XUID of local player\n");
 			return;
 		}
+		}
 	}
+#endif
 
     double x = packet->x / 32.0;
     double y = packet->y / 32.0;
@@ -1042,11 +1095,35 @@ void ClientConnection::handleChunkTilesUpdate(shared_ptr<ChunkTilesUpdatePacket>
 
 void ClientConnection::handleBlockRegionUpdate(shared_ptr<BlockRegionUpdatePacket> packet)
 {
+	if (!packet->valid)
+	{
+		app.DebugPrintf("Dropping invalid block region packet\n");
+		return;
+	}
+
+#ifdef _WINDOWS64
+	// Chunk progress is useful for automated tests and for diagnosing slow
+	// joins on a remote server.
+	{
+		static volatile LONG s_clientChunkCount = 0;
+		LONG count = InterlockedIncrement(&s_clientChunkCount);
+		if ((count % 25) == 0)
+		{
+			app.DebugPrintf("CLIENT_CHUNKS: %ld (dim=%d at %d,%d)\n", count, packet->levelIdx, packet->x, packet->z);
+		}
+	}
+#endif
+
 	// 4J - changed to encode level in packet
 	MultiPlayerLevel *dimensionLevel = (MultiPlayerLevel *)minecraft->levels[packet->levelIdx];
 	if( dimensionLevel )
 	{
 		PIXBeginNamedEvent(0,"Handle block region update");
+
+#ifdef _WINDOWS64
+		static bool traceChunks = getenv("MC_CHUNK_TRACE") != NULL;
+		if (traceChunks) app.DebugPrintf("BRUP begin x=%d z=%d full=%d len=%d\n", packet->x, packet->z, (int)packet->bIsFullChunk, packet->buffer.length);
+#endif
 
 		int y1 = packet->y + packet->ys;
 		if(packet->bIsFullChunk)
@@ -1054,16 +1131,28 @@ void ClientConnection::handleBlockRegionUpdate(shared_ptr<BlockRegionUpdatePacke
 			y1 = Level::maxBuildHeight;
 			if(packet->buffer.length > 0) LevelChunk::reorderBlocksAndDataToXZY(packet->y, packet->xs, packet->ys, packet->zs, &packet->buffer);
 		}
+#ifdef _WINDOWS64
+		if (traceChunks) app.DebugPrintf("BRUP reordered x=%d z=%d\n", packet->x, packet->z);
+#endif
 		dimensionLevel->clearResetRegion(packet->x, packet->y, packet->z, packet->x + packet->xs - 1, y1 - 1, packet->z + packet->zs - 1);
+#ifdef _WINDOWS64
+		if (traceChunks) app.DebugPrintf("BRUP reset-cleared x=%d z=%d\n", packet->x, packet->z);
+#endif
 
 		// Only full chunks send lighting information now - added flag to end of this call
 		dimensionLevel->setBlocksAndData(packet->x, packet->y, packet->z, packet->xs, packet->ys, packet->zs, packet->buffer, packet->bIsFullChunk);
+#ifdef _WINDOWS64
+		if (traceChunks) app.DebugPrintf("BRUP data-set x=%d z=%d\n", packet->x, packet->z);
+#endif
 
 //		OutputDebugString("END BRU\n");
 
 		// 4J - remove any tite entities in this region which are associated with a tile that is now no longer a tile entity. Without doing this we end up with stray
 		// tile entities kicking round, which leads to a bug where chests can't be properly placed again in a location after (say) a chest being removed by TNT
 		dimensionLevel->removeUnusedTileEntitiesInRegion(packet->x, packet->y, packet->z, packet->x + packet->xs, y1, packet->z + packet->zs );
+#ifdef _WINDOWS64
+		if (traceChunks) app.DebugPrintf("BRUP tes-removed x=%d z=%d\n", packet->x, packet->z);
+#endif
 
 		// If this is a full packet for a chunk, make sure that the cache now considers that it has data for this chunk - this is used to determine whether to bother
 		// rendering mobs or not, so we don't have them in crazy positions before the data is there
@@ -1071,6 +1160,9 @@ void ClientConnection::handleBlockRegionUpdate(shared_ptr<BlockRegionUpdatePacke
 		{
 			dimensionLevel->dataReceivedForChunk( packet->x >> 4, packet->z >> 4 );
 		}
+#ifdef _WINDOWS64
+		if (traceChunks) app.DebugPrintf("BRUP end x=%d z=%d\n", packet->x, packet->z);
+#endif
 		PIXEndNamedEvent();
 	}
 }
@@ -1134,6 +1226,7 @@ void ClientConnection::handleTileUpdate(shared_ptr<TileUpdatePacket> packet)
 
 void ClientConnection::handleDisconnect(shared_ptr<DisconnectPacket> packet)
 {
+	app.DebugPrintf("ClientConnection::handleDisconnect reason=%d\n", (int)packet->reason);
 	connection->close(DisconnectPacket::eDisconnect_Kicked);
     done = true;
 	
@@ -1149,6 +1242,7 @@ void ClientConnection::handleDisconnect(shared_ptr<DisconnectPacket> packet)
 
 void ClientConnection::onDisconnect(DisconnectPacket::eDisconnectReason reason, void *reasonObjects)
 {
+	app.DebugPrintf("ClientConnection::onDisconnect reason=%d done=%d\n", (int)reason, (int)done);
     if (done) return;
     done = true;
 
@@ -1607,6 +1701,7 @@ void ClientConnection::handleEntityActionAtPosition(shared_ptr<EntityActionAtPos
 
 void ClientConnection::handlePreLogin(shared_ptr<PreLoginPacket> packet)
 {
+	app.DebugPrintf("ClientConnection::handlePreLogin entered ugc=%u\n", packet->m_ugcPlayersVersion);
 //	printf("Client: handlePreLogin\n");
 #if 1
 	// 4J - Check that we can play with all the players already in the game who have Friends-Only UGC set
@@ -1615,6 +1710,15 @@ void ClientConnection::handlePreLogin(shared_ptr<PreLoginPacket> packet)
 	BOOL isAtLeastOneFriend = g_NetworkManager.IsHost();
 	BOOL isFriendsWithHost = TRUE;
 	BOOL cantPlayContentRestricted = FALSE;
+
+#ifdef _XBOX
+	// Direct TCP client PoC: a dedicated TCP server has no Xbox Live host
+	// player, so the "friends with the host" requirement cannot be met.
+	if (g_NetworkManager.GetHostPlayer() == NULL)
+	{
+		isAtLeastOneFriend = TRUE;
+	}
+#endif
 	
 	if(!g_NetworkManager.IsHost())
 	{
@@ -2049,6 +2153,7 @@ void ClientConnection::handlePreLogin(shared_ptr<PreLoginPacket> packet)
 		}
 		BOOL allAllowed, friendsAllowed;
 		ProfileManager.AllowedPlayerCreatedContent(m_userIndex,true,&allAllowed,&friendsAllowed);
+		app.DebugPrintf("ClientConnection::handlePreLogin sending LoginPacket name=%ls\n", minecraft->user->name.c_str());
 		send( shared_ptr<LoginPacket>( new LoginPacket(minecraft->user->name, SharedConstants::NETWORK_PROTOCOL_VERSION, offlineXUID, onlineXUID, (allAllowed!=TRUE && friendsAllowed==TRUE), 
 			packet->m_ugcPlayersVersion, app.GetPlayerSkinId(m_userIndex), app.GetPlayerCapeId(m_userIndex), ProfileManager.IsGuest( m_userIndex ))));
 
@@ -2976,6 +3081,15 @@ bool ClientConnection::isServerPacketListener()
 
 void ClientConnection::handlePlayerInfo(shared_ptr<PlayerInfoPacket> packet)
 {
+#ifdef _WINDOWS64
+	// Build the session roster on TCP clients: every PlayerInfoPacket now
+	// carries the player's display name.
+	if (!packet->m_playerName.empty())
+	{
+		g_NetworkManager.RegisterTcpPlayer((unsigned char)packet->m_networkSmallId, packet->m_playerName, packet->m_networkSmallId == 0);
+	}
+#endif
+
 	unsigned int startingPrivileges = app.GetPlayerPrivileges(packet->m_networkSmallId);
 
 	INetworkPlayer *networkPlayer = g_NetworkManager.GetPlayerBySmallId(packet->m_networkSmallId);

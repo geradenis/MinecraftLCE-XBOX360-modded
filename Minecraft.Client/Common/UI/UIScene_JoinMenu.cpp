@@ -536,6 +536,26 @@ void UIScene_JoinMenu::JoinGame(UIScene_JoinMenu* pClass)
 				ui.NavigateToHomeMenu();
 			}
 		}
+		else
+		{
+			// M3: the console UI used to rely on a platform callback to move to
+			// the loading screen. The TCP prototype has no such callback, so
+			// start the network game thread directly.
+			LoadingInputParams *loadingParams = new LoadingInputParams();
+			loadingParams->func = &CGameNetworkManager::RunNetworkGameThreadProc;
+			loadingParams->lpParam = NULL;
+
+			app.SetAutosaveTimerTime();
+
+			UIFullscreenProgressCompletionData *completionData = new UIFullscreenProgressCompletionData();
+			completionData->bShowBackground = TRUE;
+			completionData->bShowLogo = TRUE;
+			completionData->type = e_ProgressCompletion_CloseAllPlayersUIScenes;
+			completionData->iPad = pClass->m_iPad;
+			loadingParams->completionData = completionData;
+
+			ui.NavigateToScene(pClass->m_iPad, eUIScene_FullscreenProgress, loadingParams);
+		}
 	}
 }
 
